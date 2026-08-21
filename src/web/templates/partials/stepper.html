@@ -1,0 +1,13 @@
+{# Workflow progress. State is carried by the marker glyph and the label text,
+   not by colour alone. #}
+<ol class="stepper" aria-label="Assessment workflow progress">
+  {% for step in ctx.stage_states() %}
+  <li class="{{ step.state }}">
+    <span class="dot" aria-hidden="true">{% if step.state == 'done' %}✓{% elif step.state == 'current' %}●{% else %}○{% endif %}</span>
+    <span class="name">
+      {{ step.label }}{% if step.state == 'current' %} <span class="visually-current">(current)</span>{% endif %}
+    </span>
+    {% if not loop.last %}<span class="bar" aria-hidden="true"></span>{% endif %}
+  </li>
+  {% endfor %}
+</ol>

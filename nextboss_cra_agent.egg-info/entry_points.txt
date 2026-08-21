@@ -1,0 +1,2 @@
+[console_scripts]
+nextboss-cra = src.cli:app

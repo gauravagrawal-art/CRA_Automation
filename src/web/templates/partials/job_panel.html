@@ -1,0 +1,35 @@
+{# Polled fragment. data-status drives the poller; data-redirect is refined by
+   the job itself once it knows the run ID. #}
+<div data-status="{{ job.status.value }}" data-redirect="{{ job.redirect }}">
+  <div class="panel-head">
+    <h2>
+      {% if job.status.value == 'RUNNING' %}<span class="spinner" aria-hidden="true"></span> {% endif %}
+      {{ job.title }}
+    </h2>
+    <div class="right">
+      <span class="badge {{ 'PASS' if job.status.value == 'SUCCEEDED' else 'FAIL' if job.status.value == 'FAILED' else 'OPEN' }}">
+        {{ job.status.value }}
+      </span>
+    </div>
+  </div>
+
+  <ol class="joblog">
+    {% for step in job.steps %}
+    <li class="{% if job.status.value == 'FAILED' and loop.last %}failed{% endif %}">
+      {{ step.message }}<span class="at">{{ step.at | ts }}</span>
+    </li>
+    {% endfor %}
+    {% if job.status.value == 'RUNNING' %}
+    <li class="pending">Working…</li>
+    {% endif %}
+  </ol>
+
+  {% if job.status.value == 'FAILED' %}
+  <div class="notice error" role="alert">
+    <strong>{{ job.error }}</strong>
+    <p class="small muted">Nothing was written. Fix the cause and run the step again.</p>
+  </div>
+  {% elif job.status.value == 'SUCCEEDED' %}
+  <p class="small muted">Finished {{ job.finished_at | ts }}. <a href="{{ job.redirect }}">Continue</a></p>
+  {% endif %}
+</div>

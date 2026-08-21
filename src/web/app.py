@@ -1,0 +1,872 @@
+"""FastAPI routes for the CRA assessment UI.
+
+Routes read artifacts and call the shared service layer. No route contains
+compliance logic: nothing here decides a verdict, recomputes a count or invents
+a recommendation. Actions are POST-only, same-origin, and every one of them
+delegates to the same function the CLI calls.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlencode, urlparse
+
+from fastapi import FastAPI, Form, Request
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+from src.assessment.models import Verdict
+from src.config import (
+    MCP_CAPABILITY_CATALOG,
+    MCP_PATH_ALLOWLIST,
+    POLICY_DIR,
+    PRODUCT_DIR,
+    PROJECT_ROOT,
+)
+from src.evidence.models import CollectionStatus
+from src.registry.models import ApplicabilityStatus, EvidenceMode
+from src.remediation.models import ActionType, RemediationStatus
+from src.services import context, runs_service, workflow
+from src.services.jobs import registry as jobs
+from src.services.registry_service import (
+    RegistryServiceError,
+    blocking_conflicts,
+    load_approved,
+    load_document_registry,
+    load_draft,
+    point_key_from_title,
+    product_context,
+    suggest_next_version,
+)
+from src.services.runs_service import ArtifactError
+from src.services.workflow import WorkflowError
+from src.web import charts
+from src.web.glossary import GLOSSARY, explain
+
+BASE_DIR = Path(__file__).resolve().parent
+PAGE_SIZE = 50
+
+app = FastAPI(
+    title="NextBoss-XT CRA Technical Readiness",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
+app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+
+def _fmt_ts(value: str | None) -> str:
+    """Render an ISO timestamp as a readable local-style string."""
+    if not value:
+        return "—"
+    text = str(value).replace("T", " ")
+    if "." in text:
+        text = text.split(".", 1)[0]
+    return text.replace("+00:00", " UTC").strip()
+
+
+def _short(value: str | None, length: int = 12) -> str:
+    if not value:
+        return "—"
+    text = str(value)
+    return text if len(text) <= length else f"{text[:length]}…"
+
+
+def _pretty(value: Any) -> str:
+    """Enum-style token to sentence case, e.g. HUMAN_REVIEW -> Human review."""
+    if value is None:
+        return "—"
+    text = str(getattr(value, "value", value))
+    return text.replace("_", " ").capitalize()
+
+
+def _tojson(value: Any, indent: int | None = None) -> str:
+    """JSON for <pre> blocks. Jinja still HTML-escapes the result."""
+    return json.dumps(value, indent=indent, default=str, ensure_ascii=False)
+
+
+def _unique(values: Any) -> list[Any]:
+    """Preserve-order unique, for table cells that would otherwise repeat."""
+    seen: set[Any] = set()
+    out: list[Any] = []
+    for item in values:
+        if item in seen or item in (None, ""):
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _page_num(params: dict[str, Any], default: int = 1) -> int:
+    try:
+        return max(1, int(params.get("page", default) or default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _query(params: dict[str, Any], **overrides: Any) -> str:
+    """Build a query string from current filters plus overrides; drop empties."""
+    merged = {**params, **overrides}
+    clean = {k: v for k, v in merged.items() if v not in (None, "", "all")}
+    return f"?{urlencode(clean)}" if clean else ""
+
+
+templates.env.filters["ts"] = _fmt_ts
+templates.env.filters["short"] = _short
+templates.env.filters["pretty"] = _pretty
+templates.env.filters["tojson"] = _tojson
+templates.env.filters["unique"] = _unique
+templates.env.globals["explain"] = explain
+templates.env.globals["query"] = _query
+templates.env.globals["Verdict"] = Verdict
+templates.env.globals["VERDICT_ORDER"] = charts.VERDICT_ORDER
+templates.env.globals["CollectionStatus"] = CollectionStatus
+templates.env.globals["ActionType"] = ActionType
+templates.env.globals["RemediationStatus"] = RemediationStatus
+templates.env.globals["ApplicabilityStatus"] = ApplicabilityStatus
+templates.env.globals["EvidenceMode"] = EvidenceMode
+
+
+@app.exception_handler(ArtifactError)
+@app.exception_handler(WorkflowError)
+@app.exception_handler(RegistryServiceError)
+def _known_failure(request: Request, exc: Exception) -> Response:
+    """Turn a refused or unreadable artifact into a page, not a stack trace."""
+    return _page(
+        request,
+        "error.html",
+        nav="overview",
+        title="Cannot continue",
+        message=str(exc),
+    )
+
+
+# --- shared page scaffolding ------------------------------------------------
+
+
+def _page(
+    request: Request,
+    template: str,
+    *,
+    nav: str,
+    title: str,
+    stage: str | None = None,
+    **extra: Any,
+) -> Response:
+    """Render a page with the shell context every template expects."""
+    ctx = context.workspace()
+    if stage:
+        ctx.stage = stage
+    payload: dict[str, Any] = {
+        "request": request,
+        "ctx": ctx,
+        "nav": nav,
+        "page_title": title,
+        "notice": request.query_params.get("msg", ""),
+        "notice_level": request.query_params.get("level", "info"),
+        "running_jobs": jobs.running(),
+    }
+    payload.update(extra)
+    return templates.TemplateResponse(request, template, payload)
+
+
+def _redirect(href: str, message: str = "", level: str = "info") -> RedirectResponse:
+    """Post/redirect/get, carrying an optional message for the next page."""
+    if message:
+        joiner = "&" if "?" in href else "?"
+        href = f"{href}{joiner}{urlencode({'msg': message, 'level': level})}"
+    return RedirectResponse(href, status_code=303)
+
+
+def _guard_origin(request: Request) -> None:
+    """Reject cross-origin form posts.
+
+    The UI has no authentication because it is a local single-user tool, which
+    means any page in the browser could otherwise post to it. Comparing the
+    Origin against this server's host closes that without adding sessions.
+    """
+    origin = request.headers.get("origin") or request.headers.get("referer")
+    if not origin:
+        return
+    host = urlparse(origin).netloc
+    if host and host != request.headers.get("host"):
+        raise WorkflowError("Cross-origin request refused.")
+
+
+def _resolve_run(requested: str | None, *, require_assessment: bool = False) -> str | None:
+    """Pick the run a page should show: the requested one, else the newest."""
+    known = runs_service.list_run_ids()
+    if requested and requested in known:
+        return requested
+    runs = runs_service.list_runs()
+    if require_assessment:
+        for run in runs:
+            if run.has_assessment:
+                return run.run_id
+        return None
+    latest = runs_service.latest_run(runs)
+    return latest.run_id if latest else None
+
+
+def _paginate(items: list, page: int) -> tuple[list, dict[str, Any]]:
+    total = len(items)
+    pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = min(max(page, 1), pages)
+    start = (page - 1) * PAGE_SIZE
+    window = items[start : start + PAGE_SIZE]
+    meta = {
+        "page": page,
+        "pages": pages,
+        "total": total,
+        "start": start + 1 if total else 0,
+        "end": start + len(window),
+        "show": pages > 1,
+    }
+    return window, meta
+
+
+# --- Overview ---------------------------------------------------------------
+
+
+@app.get("/", response_class=HTMLResponse)
+def overview(request: Request) -> Response:
+    ctx = context.workspace()
+    latest = ctx.latest
+
+    verdict_chart = charts.Chart(svg="", empty=True, summary="No assessment yet.")
+    evidence_chart = charts.Chart(svg="", empty=True, summary="No scan yet.")
+    applicability_chart = charts.Chart(svg="", empty=True, summary="No registry yet.")
+    trend = charts.Chart(svg="", empty=True, summary="")
+
+    if latest and latest.has_assessment:
+        verdict_chart = charts.doughnut(
+            charts.verdict_segments(latest.verdict_counts, run_id=latest.run_id),
+            center_label="controls",
+        )
+    if latest and latest.has_evidence:
+        evidence_chart = charts.hbars(
+            charts.evidence_segments(latest.evidence_status_counts, run_id=latest.run_id)
+        )
+    if ctx.registry.scannable:
+        try:
+            applicability_chart = charts.hbars(
+                charts.applicability_segments(load_approved().controls)
+            )
+        except (RegistryServiceError, ValueError):
+            pass
+
+    series_runs = runs_service.comparable_runs(ctx.runs)
+    if series_runs:
+        trend = charts.grouped_bars(
+            [r.run_id for r in series_runs],
+            [
+                charts.TrendSeries(
+                    verdict.value,
+                    charts.VERDICT_COLORS[verdict],
+                    [r.verdict_counts.get(verdict.value, 0) for r in series_runs],
+                )
+                for verdict in (
+                    Verdict.PASS,
+                    Verdict.FAIL,
+                    Verdict.INSUFFICIENT_EVIDENCE,
+                )
+            ],
+        )
+
+    return _page(
+        request,
+        "overview.html",
+        nav="overview",
+        title="Overview",
+        verdict_chart=verdict_chart,
+        evidence_chart=evidence_chart,
+        applicability_chart=applicability_chart,
+        trend=trend,
+        trend_runs=series_runs,
+    )
+
+
+# --- Sources & Registry -----------------------------------------------------
+
+
+@app.get("/registry", response_class=HTMLResponse)
+def registry_page(request: Request) -> Response:
+    params = dict(request.query_params)
+    q = params.get("q", "").strip().lower()
+    applicability = params.get("applicability", "")
+    evidence_mode = params.get("mode", "")
+    review = params.get("review", "")
+    cra = params.get("cra", "")
+    page = _page_num(params)
+
+    state = context.workspace().registry
+    documents: list = []
+    controls: list = []
+    load_error = ""
+
+    try:
+        documents = list(load_document_registry().documents)
+    except (RegistryServiceError, ValueError) as exc:
+        load_error = str(exc)
+
+    try:
+        controls = list(load_approved().controls) if state.scannable else list(load_draft().controls)
+    except (RegistryServiceError, ValueError) as exc:
+        load_error = load_error or str(exc)
+
+    cra_points = sorted(
+        {p for p in (point_key_from_title(c.title) for c in controls) if p}
+    )
+
+    filtered = []
+    for control in controls:
+        if applicability and control.applicability.status.value != applicability:
+            continue
+        if review == "yes" and not control.human_review_required:
+            continue
+        if review == "no" and control.human_review_required:
+            continue
+        if evidence_mode:
+            modes = {item.mode.value for item in control.evidence_plan}
+            if evidence_mode not in modes:
+                continue
+        if cra and point_key_from_title(control.title) != cra:
+            continue
+        if q and q not in f"{control.control_id} {control.title}".lower():
+            continue
+        filtered.append(control)
+
+    window, pager = _paginate(filtered, page)
+    profile, profile_error = product_context()
+    conflicts = blocking_conflicts() if state.draft_exists else []
+
+    return _page(
+        request,
+        "registry.html",
+        nav="registry",
+        title="Sources & Registry",
+        stage="registry" if not state.scannable else None,
+        documents=documents,
+        controls=window,
+        matched=len(filtered),
+        total_controls=len(controls),
+        pager=pager,
+        filters=params,
+        cra_points=cra_points,
+        profile=profile,
+        profile_error=profile_error,
+        load_error=load_error,
+        validation=workflow.validation_state(),
+        registry_source="approved" if state.scannable else "draft",
+        next_version=suggest_next_version(),
+        blocking_conflicts=conflicts,
+    )
+
+
+@app.get("/registry/control/{control_id}", response_class=HTMLResponse)
+def registry_control(request: Request, control_id: str) -> Response:
+    state = context.workspace().registry
+    try:
+        controls = load_approved().controls if state.scannable else load_draft().controls
+    except (RegistryServiceError, ValueError) as exc:
+        return _page(
+            request, "error.html", nav="registry", title="Control", message=str(exc)
+        )
+
+    control = next((c for c in controls if c.control_id == control_id), None)
+    if control is None:
+        return _page(
+            request,
+            "error.html",
+            nav="registry",
+            title="Control not found",
+            message=f"No control '{control_id}' in the current registry.",
+        )
+
+    return _page(
+        request,
+        "registry_control.html",
+        nav="registry",
+        title=control.control_id,
+        control=control,
+        cra_point=point_key_from_title(control.title),
+        registry_source="approved" if state.scannable else "draft",
+    )
+
+
+# --- Evidence ---------------------------------------------------------------
+
+
+@app.get("/evidence", response_class=HTMLResponse)
+def evidence_page(request: Request) -> Response:
+    params = dict(request.query_params)
+    run_id = _resolve_run(params.get("run"))
+    status = params.get("status", "")
+    q = params.get("q", "").strip().lower()
+    page = _page_num(params)
+
+    run = runs_service.load_evidence(run_id) if run_id else None
+    items = list(run.evidence) if run else []
+
+    filtered = []
+    for item in items:
+        if status and item.status.value != status:
+            continue
+        if q:
+            keys = " ".join(r.evidence_key for r in item.requested_by)
+            if q not in f"{item.evidence_id} {item.tool} {keys}".lower():
+                continue
+        filtered.append(item)
+
+    window, pager = _paginate(filtered, page)
+    chart = charts.Chart(svg="", empty=True, summary="No scan yet.")
+    if run:
+        chart = charts.hbars(
+            charts.evidence_segments(run.summary.by_status, run_id=run_id or "")
+        )
+
+    return _page(
+        request,
+        "evidence.html",
+        nav="evidence",
+        title="Evidence",
+        stage="evidence",
+        run=run,
+        run_id=run_id,
+        items=window,
+        matched=len(filtered),
+        pager=pager,
+        filters=params,
+        chart=chart,
+        scenarios=context.scenarios(),
+    )
+
+
+@app.get("/evidence/{run_id}/{evidence_id}", response_class=HTMLResponse)
+def evidence_detail(request: Request, run_id: str, evidence_id: str) -> Response:
+    if run_id not in runs_service.list_run_ids():
+        return _page(
+            request, "error.html", nav="evidence", title="Run not found",
+            message=f"No run '{run_id}'.",
+        )
+    run = runs_service.load_evidence(run_id)
+    item = next((e for e in run.evidence if e.evidence_id == evidence_id), None) if run else None
+    if item is None:
+        return _page(
+            request, "error.html", nav="evidence", title="Evidence not found",
+            message=f"No evidence item '{evidence_id}' in run {run_id}.",
+        )
+    return _page(
+        request,
+        "evidence_item.html",
+        nav="evidence",
+        title=item.evidence_id,
+        stage="evidence",
+        run=run,
+        run_id=run_id,
+        item=item,
+    )
+
+
+# --- Assessment -------------------------------------------------------------
+
+
+@app.get("/assessment", response_class=HTMLResponse)
+def assessment_page(request: Request) -> Response:
+    params = dict(request.query_params)
+    run_id = _resolve_run(params.get("run"), require_assessment=True)
+    verdict = params.get("verdict", "")
+    review = params.get("review", "")
+    mode = params.get("mode", "")
+    q = params.get("q", "").strip().lower()
+    page = _page_num(params)
+
+    assessment = runs_service.load_assessment(run_id) if run_id else None
+    results = list(assessment.results) if assessment else []
+
+    filtered = []
+    for result in results:
+        if verdict and result.verdict.value != verdict:
+            continue
+        if review == "yes" and not result.registry_human_review_flag:
+            continue
+        if mode and result.evaluation_mode != mode:
+            continue
+        if q and q not in f"{result.control_id} {result.title}".lower():
+            continue
+        filtered.append(result)
+
+    window, pager = _paginate(filtered, page)
+    overview_run = runs_service.run_overview(run_id) if run_id else None
+    chart = charts.Chart(svg="", empty=True, summary="No assessment yet.")
+    if overview_run and overview_run.has_assessment:
+        chart = charts.doughnut(
+            charts.verdict_segments(overview_run.verdict_counts, run_id=run_id or ""),
+            center_label="controls",
+        )
+
+    unassessed = [r for r in runs_service.list_runs() if r.has_evidence and not r.has_assessment]
+
+    return _page(
+        request,
+        "assessment.html",
+        nav="assessment",
+        title="Assessment",
+        stage="assessment",
+        assessment=assessment,
+        run_id=run_id,
+        results=window,
+        matched=len(filtered),
+        pager=pager,
+        filters=params,
+        chart=chart,
+        unassessed=unassessed,
+    )
+
+
+@app.get("/assessment/control/{control_id}", response_class=HTMLResponse)
+def assessment_control(request: Request, control_id: str) -> Response:
+    run_id = _resolve_run(request.query_params.get("run"), require_assessment=True)
+    assessment = runs_service.load_assessment(run_id) if run_id else None
+    result = (
+        next((r for r in assessment.results if r.control_id == control_id), None)
+        if assessment
+        else None
+    )
+    if result is None:
+        return _page(
+            request, "error.html", nav="assessment", title="Control not found",
+            message=f"No assessed control '{control_id}' in run {run_id}.",
+        )
+
+    evidence_run = runs_service.load_evidence(run_id) if run_id else None
+    evidence_by_id = (
+        {e.evidence_id: e for e in evidence_run.evidence} if evidence_run else {}
+    )
+    remediation = runs_service.load_remediation(run_id) if run_id else None
+    item = (
+        next((i for i in remediation.items if i.finding_control_id == control_id), None)
+        if remediation
+        else None
+    )
+
+    return _page(
+        request,
+        "assessment_control.html",
+        nav="assessment",
+        title=result.control_id,
+        stage="assessment",
+        assessment=assessment,
+        run_id=run_id,
+        result=result,
+        evidence_by_id=evidence_by_id,
+        remediation_item=item,
+    )
+
+
+# --- Remediation & Verify ---------------------------------------------------
+
+
+@app.get("/remediation", response_class=HTMLResponse)
+def remediation_page(request: Request) -> Response:
+    params = dict(request.query_params)
+    run_id = _resolve_run(params.get("run"), require_assessment=True)
+    tab = params.get("tab", ActionType.TECHNICAL_REMEDIATION.value)
+    if tab not in {a.value for a in ActionType}:
+        tab = ActionType.TECHNICAL_REMEDIATION.value
+
+    remediation = runs_service.load_remediation(run_id) if run_id else None
+    verification = runs_service.load_verification(run_id) if run_id else None
+    if verification is None and remediation is not None:
+        verification = remediation.verification
+
+    items = [i for i in remediation.items if i.action_type.value == tab] if remediation else []
+    counts = remediation.summary.by_action_type if remediation else {}
+
+    return _page(
+        request,
+        "remediation.html",
+        nav="remediation",
+        title="Remediation & Verify",
+        stage="remediation",
+        remediation=remediation,
+        verification=verification,
+        run_id=run_id,
+        items=items,
+        tab=tab,
+        counts=counts,
+        filters=params,
+        previous_run=runs_service.previous_assessed_run(run_id) if run_id else None,
+        assessed_runs=[r for r in runs_service.list_runs() if r.has_assessment],
+        targets=context.list_targets(),
+        scenarios=context.scenarios(),
+    )
+
+
+# --- Reports ----------------------------------------------------------------
+
+
+@app.get("/reports", response_class=HTMLResponse)
+def reports_page(request: Request) -> Response:
+    return _page(
+        request,
+        "reports.html",
+        nav="reports",
+        title="Reports",
+        runs=runs_service.list_runs(),
+    )
+
+
+@app.get("/runs/{run_id}", response_class=HTMLResponse)
+def run_report(request: Request, run_id: str) -> Response:
+    if run_id not in runs_service.list_run_ids():
+        return _page(
+            request, "error.html", nav="reports", title="Run not found",
+            message=f"No run '{run_id}'.",
+        )
+
+    assessment = runs_service.load_assessment(run_id)
+    remediation = runs_service.load_remediation(run_id)
+    verification = runs_service.load_verification(run_id)
+    if verification is None and remediation is not None:
+        verification = remediation.verification
+    evidence = runs_service.load_evidence(run_id)
+
+    by_verdict: dict[str, list] = {}
+    if assessment:
+        for result in assessment.results:
+            by_verdict.setdefault(result.verdict.value, []).append(result)
+
+    return _page(
+        request,
+        "report_view.html",
+        nav="reports",
+        title=f"Report {run_id}",
+        run_id=run_id,
+        overview=runs_service.run_overview(run_id),
+        assessment=assessment,
+        remediation=remediation,
+        verification=verification,
+        evidence=evidence,
+        by_verdict=by_verdict,
+        has_html_report=runs_service.report_path(run_id).exists(),
+        has_final_report=runs_service.final_report_path(run_id).exists(),
+    )
+
+
+#: Artifact key -> resolver. Only these files may be served.
+_ARTIFACTS = {
+    "evidence.json": (runs_service.evidence_path, "application/json"),
+    "assessment.json": (runs_service.assessment_path, "application/json"),
+    "remediation.json": (runs_service.remediation_path, "application/json"),
+    "verification.json": (runs_service.verification_path, "application/json"),
+    "assessment.html": (runs_service.report_path, "text/html"),
+    "final-report.html": (runs_service.final_report_path, "text/html"),
+}
+
+
+@app.get("/runs/{run_id}/artifact/{name}")
+def run_artifact(run_id: str, name: str) -> Response:
+    """Serve one known artifact of a known run.
+
+    Both the run and the filename come from fixed sets, so no request can point
+    this at a path the workflow did not produce.
+    """
+    if run_id not in runs_service.list_run_ids() or name not in _ARTIFACTS:
+        return Response("Not found", status_code=404)
+    resolver, media_type = _ARTIFACTS[name]
+    path = resolver(run_id)
+    if not path.exists():
+        return Response("Not found", status_code=404)
+    return FileResponse(path, media_type=media_type, filename=f"{run_id}-{name}")
+
+
+# --- Settings ---------------------------------------------------------------
+
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request) -> Response:
+    profile, profile_error = product_context()
+    return _page(
+        request,
+        "settings.html",
+        nav="settings",
+        title="Settings",
+        paths=[
+            ("Project root", PROJECT_ROOT),
+            ("Registry", PROJECT_ROOT / "registry"),
+            ("Approved baselines", PROJECT_ROOT / "registry" / "approved"),
+            ("Evidence runs", PROJECT_ROOT / "evidence"),
+            ("Assessments", PROJECT_ROOT / "assessments"),
+            ("Targets", PROJECT_ROOT / "targets"),
+            ("Product profile", PRODUCT_DIR),
+            ("Policy", POLICY_DIR),
+        ],
+        mcp_tools=MCP_CAPABILITY_CATALOG,
+        path_allowlist=MCP_PATH_ALLOWLIST,
+        glossary=sorted(GLOSSARY.items()),
+        profile=profile,
+        profile_error=profile_error,
+    )
+
+
+# --- Jobs -------------------------------------------------------------------
+
+
+@app.get("/jobs/{job_id}", response_class=HTMLResponse)
+def job_page(request: Request, job_id: str) -> Response:
+    job = jobs.get(job_id)
+    if job is None:
+        return _page(
+            request, "error.html", nav="overview", title="Job not found",
+            message="That job is no longer held in memory. Its artifacts, if any, are on disk.",
+        )
+    return _page(request, "job.html", nav="job", title=job.title, job=job)
+
+
+@app.get("/jobs/{job_id}/panel", response_class=HTMLResponse)
+def job_panel(request: Request, job_id: str) -> Response:
+    """The polling fragment: just the progress panel, no shell."""
+    job = jobs.get(job_id)
+    if job is None:
+        return HTMLResponse('<p class="muted">Job not found.</p>', status_code=404)
+    return templates.TemplateResponse(
+        request, "partials/job_panel.html", {"request": request, "job": job}
+    )
+
+
+# --- Actions ----------------------------------------------------------------
+
+
+def _action(request: Request, run: Any, fallback: str) -> RedirectResponse:
+    """Run an action, turning a refusal into a message on the page it came from."""
+    try:
+        _guard_origin(request)
+        return run()
+    except (WorkflowError, RegistryServiceError) as exc:
+        return _redirect(fallback, str(exc), "error")
+
+
+@app.post("/actions/registry/build")
+def action_build(request: Request) -> Response:
+    def run() -> RedirectResponse:
+        job = workflow.start_build_registry()
+        return _redirect(f"/jobs/{job.job_id}")
+
+    return _action(request, run, "/registry")
+
+
+@app.post("/actions/registry/validate")
+def action_validate(request: Request) -> Response:
+    def run() -> RedirectResponse:
+        job = workflow.start_validate_registry()
+        return _redirect(f"/jobs/{job.job_id}")
+
+    return _action(request, run, "/registry")
+
+
+@app.post("/actions/registry/approve")
+def action_approve(
+    request: Request,
+    approver: str = Form(...),
+    version: str = Form(...),
+    allow_conflicts: str = Form(""),
+) -> Response:
+    def run() -> RedirectResponse:
+        digest = workflow.approve_registry_now(
+            approver=approver,
+            version=version,
+            allow_conflicts=allow_conflicts.lower() in {"true", "on", "1", "yes"},
+        )
+        return _redirect(
+            "/registry",
+            f"Registry v{version.strip()} approved. Hash {digest[:16]}…",
+            "success",
+        )
+
+    return _action(request, run, "/registry")
+
+
+@app.post("/actions/evidence/collect")
+def action_collect(
+    request: Request,
+    target: str = Form(...),
+    scenario: str = Form(""),
+    chain: str = Form("evidence"),
+) -> Response:
+    def run() -> RedirectResponse:
+        plan = workflow.plan_scan(
+            target_key=target,
+            scenario=scenario or None,
+            chain="full" if chain == "full" else "evidence",
+        )
+        job = workflow.start_scan(plan)
+        return _redirect(f"/jobs/{job.job_id}")
+
+    return _action(request, run, "/evidence")
+
+
+@app.post("/actions/assessment/run")
+def action_assess(request: Request, run_id: str = Form(...)) -> Response:
+    def run() -> RedirectResponse:
+        job = workflow.start_assessment(run_id)
+        return _redirect(f"/jobs/{job.job_id}")
+
+    return _action(request, run, "/assessment")
+
+
+@app.post("/actions/remediation/compose")
+def action_compose(
+    request: Request,
+    run_id: str = Form(...),
+    previous_run: str = Form(""),
+) -> Response:
+    def run() -> RedirectResponse:
+        job = workflow.start_remediation(run_id, previous_run or None)
+        return _redirect(f"/jobs/{job.job_id}")
+
+    return _action(request, run, "/remediation")
+
+
+@app.post("/actions/verification/run")
+def action_verify(
+    request: Request,
+    previous_run: str = Form(...),
+    new_run: str = Form(...),
+) -> Response:
+    def run() -> RedirectResponse:
+        job = workflow.start_verification(previous_run, new_run)
+        return _redirect(f"/jobs/{job.job_id}")
+
+    return _action(request, run, "/remediation")
+
+
+@app.post("/actions/rescan-verify")
+def action_rescan_verify(
+    request: Request,
+    target: str = Form(...),
+    previous_run: str = Form(...),
+    scenario: str = Form(""),
+) -> Response:
+    """Re-scan and verify: Flow 2, then Flow 3, then Flow 4 verification.
+
+    Nothing is written to the target. Closure comes only from the new
+    assessment's own evidence.
+    """
+
+    def run() -> RedirectResponse:
+        plan = workflow.plan_scan(
+            target_key=target,
+            scenario=scenario or None,
+            chain="verify",
+            previous_run=previous_run,
+        )
+        job = workflow.start_scan(plan)
+        return _redirect(f"/jobs/{job.job_id}")
+
+    return _action(request, run, "/remediation")

@@ -1,0 +1,43 @@
+product:
+  name: NextBoss-XT
+  type: Network Management System
+
+cra_context:
+  class: I
+  category: 6
+  category_name: Network Management Systems
+
+platform:
+  operating_system: RHEL
+
+interfaces:
+  - name: Management UI
+    type: web_ui
+    protocol: HTTPS
+    port: 8443
+
+  - name: REST API
+    type: rest_api
+    protocol: HTTPS
+    port: 443
+
+  - name: PostgreSQL
+    type: database
+    protocol: TCP
+    port: 5432
+
+  - name: SSH Administration
+    type: administration
+    protocol: SSH
+    port: 22
+
+authentication:
+  mechanisms:
+    - LDAP
+    - local_accounts
+
+configuration:
+  tls_config_file: "<TO_BE_PROVIDED>"
+  application_config: "<TO_BE_PROVIDED>"
+  ssh_config_file: "/etc/ssh/sshd_config"
+  postgres_config_file: "<TO_BE_PROVIDED>"

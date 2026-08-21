@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block stepper %}{% endblock %}
+{% block content %}
+
+<h2 class="section">Runtime</h2>
+<p class="lede">
+  This is a local single-user tool. It has no authentication and stores no credentials.
+  Capability status is reported honestly: neither LLM role is configured in this build.
+</p>
+
+<div class="grid three">
+  {% for cap in ctx.capabilities %}
+  <div class="panel">
+    <div class="label">{{ cap.name }}</div>
+    <div><span class="chip {% if cap.available %}on{% else %}warn{% endif %}">{{ cap.label }}</span></div>
+    <p class="small muted">{{ cap.detail }}</p>
+  </div>
+  {% endfor %}
+</div>
+
+<h2 class="section">Resolved paths</h2>
+<p class="lede">Artifacts live on the filesystem. The UI never accepts an arbitrary path from the browser.</p>
+<div class="panel">
+  <dl class="meta">
+    {% for label, path in paths %}
+    <dt>{{ label }}</dt>
+    <dd class="mono wrap">{{ path }}</dd>
+    {% endfor %}
+  </dl>
+</div>
+
+<h2 class="section">Approved registry versions</h2>
+<div class="panel">
+  {% if ctx.registry.approved_versions %}
+  <ul>
+    {% for v in ctx.registry.approved_versions %}
+    <li>
+      v{{ v }}{% if v == ctx.registry.latest_version %} <span class="chip on">latest</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="small muted">
+    Approved by {{ ctx.registry.approver or '—' }} on {{ ctx.registry.approved_at | ts }}.
+    Hash <span class="mono wrap">{{ ctx.registry.latest_hash or '—' }}</span>
+  </p>
+  {% else %}
+  <p class="muted">No approved baseline yet.</p>
+  {% endif %}
+</div>
+
+<h2 class="section">Product profile</h2>
+{% if profile %}
+<div class="panel">
+  <dl class="meta">
+    <dt>Product</dt><dd>{{ profile.product.name }} ({{ profile.product.type }})</dd>
+    <dt>CRA context</dt>
+    <dd>Class {{ profile.cra_context.class_ }} · Category {{ profile.cra_context.category }} {{ profile.cra_context.category_name }}</dd>
+    <dt>Platform</dt><dd>{{ profile.platform.operating_system }}</dd>
+    <dt>Authentication</dt><dd>{{ profile.authentication.mechanisms | join(', ') }}</dd>
+  </dl>
+  <p class="small"><a href="/registry">Edit is not offered here — change the YAML on disk and rebuild the draft.</a></p>
+</div>
+{% else %}
+<div class="notice error">{{ profile_error }}</div>
+{% endif %}
+
+<h2 class="section">Infrastructure MCP</h2>
+<p class="lede">
+  Fourteen read-only capabilities. There is no generic shell tool and no argument accepts a
+  command string. Paths supplied by an approved control must still pass the allowlist.
+</p>
+<div class="grid two">
+  <div class="panel">
+    <h2>Registered tools</h2>
+    <ul class="small mono">{% for t in mcp_tools %}<li>{{ t }}</li>{% endfor %}</ul>
+  </div>
+  <div class="panel">
+    <h2>Path allowlist</h2>
+    <ul class="small mono">{% for p in path_allowlist %}<li>{{ p }}</li>{% endfor %}</ul>
+  </div>
+</div>
+
+<h2 class="section">Glossary</h2>
+<p class="lede">The same wording the “Why?” hints use around the UI.</p>
+<div class="panel">
+  <dl class="meta">
+    {% for term, text in glossary %}
+    <dt class="mono">{{ term }}</dt>
+    <dd class="small">{{ text }}</dd>
+    {% endfor %}
+  </dl>
+</div>
+
+{% endblock %}

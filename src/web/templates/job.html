@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block stepper %}{% endblock %}
+{% block content %}
+
+<section class="panel" id="job-panel"
+         data-poll="/jobs/{{ job.job_id }}/panel"
+         data-redirect="{{ job.redirect }}">
+  {% include 'partials/job_panel.html' %}
+</section>
+
+<p class="small muted">
+  This page refreshes itself while the step runs. The work continues even if you navigate away;
+  the result is written to disk either way.
+  <noscript>JavaScript is disabled, so reload this page to see progress.</noscript>
+</p>
+
+{% endblock %}

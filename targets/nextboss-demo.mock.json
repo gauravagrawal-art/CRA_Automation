@@ -1,0 +1,14 @@
+{
+  "target_id": "nextboss-demo",
+  "provider": "mock",
+  "environment": "vulnerable",
+  "host": "nextboss-demo",
+  "endpoints": {
+    "management_ui": {
+      "host": "nextboss-demo"
+    },
+    "rest_api": {
+      "host": "nextboss-demo"
+    }
+  }
+}

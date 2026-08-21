@@ -1,0 +1,259 @@
+{
+  "scenario": "compliant",
+  "_note": "Synthetic demo data for contract testing. Not an assertion about real NextBoss-XT.",
+
+  "system_info": {
+    "hostname": "nextboss-demo",
+    "os": "Red Hat Enterprise Linux",
+    "version": "9.4",
+    "kernel": "5.14.0-427.13.1.el9_4.x86_64",
+    "architecture": "x86_64"
+  },
+
+  "users": [
+    {
+      "username": "root",
+      "uid": 0,
+      "gid": 0,
+      "home": "/root",
+      "shell": "/sbin/nologin",
+      "locked": true,
+      "password_hash": "$6$rounds=656000$syntheticsalt$0123456789abcdefSYNTHETIC",
+      "last_login": "2026-07-02T08:11:00+00:00"
+    },
+    {
+      "username": "nbadmin",
+      "uid": 1000,
+      "gid": 1000,
+      "home": "/home/nbadmin",
+      "shell": "/bin/bash",
+      "locked": false,
+      "password_hash": "$6$rounds=656000$syntheticsalt$fedcba9876543210SYNTHETIC",
+      "last_login": "2026-08-18T14:02:00+00:00"
+    },
+    {
+      "username": "nextboss",
+      "uid": 1001,
+      "gid": 1001,
+      "home": "/opt/nextboss",
+      "shell": "/sbin/nologin",
+      "locked": true,
+      "password_hash": "!!",
+      "last_login": null
+    }
+  ],
+
+  "groups": [
+    { "group": "root", "gid": 0, "members": [] },
+    { "group": "wheel", "gid": 10, "members": ["nbadmin"] },
+    { "group": "nextboss", "gid": 1001, "members": ["nextboss"] },
+    { "group": "nextboss-operators", "gid": 1002, "members": ["nbadmin"] }
+  ],
+
+  "services": [
+    {
+      "name": "sshd",
+      "state": "running",
+      "enabled": true,
+      "executable": "/usr/sbin/sshd",
+      "description": "OpenSSH server daemon"
+    },
+    {
+      "name": "nextboss-ui",
+      "state": "running",
+      "enabled": true,
+      "executable": "/opt/nextboss/bin/nextboss-ui",
+      "description": "NextBoss-XT management user interface"
+    },
+    {
+      "name": "nextboss-api",
+      "state": "running",
+      "enabled": true,
+      "executable": "/opt/nextboss/bin/nextboss-api",
+      "description": "NextBoss-XT REST API service"
+    },
+    {
+      "name": "postgresql",
+      "state": "running",
+      "enabled": true,
+      "executable": "/usr/bin/postgres",
+      "description": "PostgreSQL database server"
+    },
+    {
+      "name": "firewalld",
+      "state": "running",
+      "enabled": true,
+      "executable": "/usr/sbin/firewalld",
+      "description": "Dynamic firewall daemon"
+    },
+    {
+      "name": "auditd",
+      "state": "running",
+      "enabled": true,
+      "executable": "/sbin/auditd",
+      "description": "Linux audit daemon"
+    }
+  ],
+
+  "listeners": [
+    { "address": "0.0.0.0", "port": 22, "transport": "tcp", "process": "sshd", "pid": 940 },
+    { "address": "0.0.0.0", "port": 443, "transport": "tcp", "process": "nextboss-api", "pid": 1180 },
+    { "address": "0.0.0.0", "port": 8443, "transport": "tcp", "process": "nextboss-ui", "pid": 1201 },
+    { "address": "127.0.0.1", "port": 5432, "transport": "tcp", "process": "postgres", "pid": 1050 }
+  ],
+
+  "processes": [
+    { "pid": 940, "user": "root", "name": "sshd", "cmdline_summary": "/usr/sbin/sshd -D" },
+    { "pid": 1050, "user": "postgres", "name": "postgres", "cmdline_summary": "/usr/bin/postgres -D /var/lib/pgsql/data" },
+    { "pid": 1180, "user": "nextboss", "name": "nextboss-api", "cmdline_summary": "/opt/nextboss/bin/nextboss-api --config /opt/nextboss/conf/api.conf" },
+    { "pid": 1201, "user": "nextboss", "name": "nextboss-ui", "cmdline_summary": "/opt/nextboss/bin/nextboss-ui --config /opt/nextboss/conf/ui.conf" }
+  ],
+
+  "files": {
+    "/etc/ssh/sshd_config": {
+      "encoding": "utf-8",
+      "size_bytes": 412,
+      "truncated": false,
+      "content": "# NextBoss-XT managed sshd configuration (synthetic demo data)\nPort 22\nProtocol 2\nPermitRootLogin no\nPermitEmptyPasswords no\nPasswordAuthentication no\nPubkeyAuthentication yes\nX11Forwarding no\nMaxAuthTries 3\nClientAliveInterval 300\nClientAliveCountMax 2\nLogLevel VERBOSE\nCiphers aes256-gcm@openssh.com,aes128-gcm@openssh.com\n"
+    }
+  },
+
+  "file_permissions": {
+    "/etc/ssh/sshd_config": {
+      "owner": "root",
+      "group": "root",
+      "mode": "0600",
+      "acl": [],
+      "size_bytes": 412,
+      "modified_at": "2026-05-14T09:20:00+00:00"
+    }
+  },
+
+  "network_configuration": {
+    "interfaces": [
+      { "name": "lo", "addresses": ["127.0.0.1/8"], "state": "up", "mtu": 65536 },
+      { "name": "eth0", "addresses": ["10.20.30.40/24"], "state": "up", "mtu": 1500 }
+    ],
+    "routes": [
+      { "destination": "default", "gateway": "10.20.30.1", "interface": "eth0" },
+      { "destination": "10.20.30.0/24", "gateway": null, "interface": "eth0" }
+    ],
+    "dns": { "servers": ["10.20.30.2"], "search": ["demo.internal"] }
+  },
+
+  "firewall": {
+    "backend": "firewalld",
+    "state": "running",
+    "enabled": true,
+    "default_zone": "public",
+    "rules": [
+      { "zone": "public", "action": "accept", "port": 22, "protocol": "tcp", "source": "10.20.0.0/16" },
+      { "zone": "public", "action": "accept", "port": 443, "protocol": "tcp", "source": "any" },
+      { "zone": "public", "action": "accept", "port": 8443, "protocol": "tcp", "source": "10.20.0.0/16" },
+      { "zone": "public", "action": "drop", "port": 5432, "protocol": "tcp", "source": "any" }
+    ]
+  },
+
+  "tls": {
+    "8443": {
+      "reachable": true,
+      "protocols": {
+        "TLSv1_0": false,
+        "TLSv1_1": false,
+        "TLSv1_2": true,
+        "TLSv1_3": true
+      },
+      "cipher_suites": [
+        "TLS_AES_256_GCM_SHA384",
+        "TLS_AES_128_GCM_SHA256",
+        "ECDHE-RSA-AES256-GCM-SHA384"
+      ],
+      "negotiated": { "protocol": "TLSv1.3", "cipher": "TLS_AES_256_GCM_SHA384" }
+    },
+    "443": {
+      "reachable": true,
+      "protocols": {
+        "TLSv1_0": false,
+        "TLSv1_1": false,
+        "TLSv1_2": true,
+        "TLSv1_3": true
+      },
+      "cipher_suites": [
+        "TLS_AES_256_GCM_SHA384",
+        "ECDHE-RSA-AES256-GCM-SHA384"
+      ],
+      "negotiated": { "protocol": "TLSv1.3", "cipher": "TLS_AES_256_GCM_SHA384" }
+    }
+  },
+
+  "certificates": {
+    "8443": {
+      "observed": true,
+      "chain_complete": true,
+      "certificates": [
+        {
+          "position": 0,
+          "subject": "CN=nextboss-demo.demo.internal",
+          "issuer": "CN=Demo Internal Issuing CA",
+          "not_before": "2026-01-01T00:00:00+00:00",
+          "not_after": "2099-12-31T23:59:59+00:00",
+          "sans": ["nextboss-demo.demo.internal", "nextboss-demo"],
+          "signature_algorithm": "sha256WithRSAEncryption",
+          "key": { "algorithm": "RSA", "size_bits": 4096 },
+          "serial": "0a1b2c3d4e5f6071"
+        },
+        {
+          "position": 1,
+          "subject": "CN=Demo Internal Issuing CA",
+          "issuer": "CN=Demo Internal Root CA",
+          "not_before": "2025-01-01T00:00:00+00:00",
+          "not_after": "2099-12-31T23:59:59+00:00",
+          "sans": [],
+          "signature_algorithm": "sha256WithRSAEncryption",
+          "key": { "algorithm": "RSA", "size_bits": 4096 },
+          "serial": "00ff11ee22dd33cc"
+        }
+      ]
+    },
+    "443": {
+      "observed": true,
+      "chain_complete": true,
+      "certificates": [
+        {
+          "position": 0,
+          "subject": "CN=api.nextboss-demo.demo.internal",
+          "issuer": "CN=Demo Internal Issuing CA",
+          "not_before": "2026-01-01T00:00:00+00:00",
+          "not_after": "2099-12-31T23:59:59+00:00",
+          "sans": ["api.nextboss-demo.demo.internal"],
+          "signature_algorithm": "sha256WithRSAEncryption",
+          "key": { "algorithm": "RSA", "size_bits": 4096 },
+          "serial": "0b2c3d4e5f607182"
+        }
+      ]
+    }
+  },
+
+  "packages": [
+    { "name": "openssh-server", "version": "8.7p1-38.el9", "source": "rhel-9-baseos" },
+    { "name": "openssl", "version": "3.0.7-27.el9", "source": "rhel-9-baseos" },
+    { "name": "postgresql-server", "version": "13.14-1.el9", "source": "rhel-9-appstream" },
+    { "name": "firewalld", "version": "1.2.5-2.el9", "source": "rhel-9-baseos" },
+    { "name": "audit", "version": "3.1.2-1.el9", "source": "rhel-9-baseos" },
+    { "name": "nextboss-xt", "version": "4.2.1", "source": "vendor" }
+  ],
+
+  "security_logs": {
+    "default": {
+      "source": "journald:_TRANSPORT=audit",
+      "available": true,
+      "logging_enabled": true,
+      "entries": [
+        { "timestamp": "2026-08-19T22:14:03+00:00", "facility": "auth", "event": "sshd: Accepted publickey for nbadmin from 10.20.30.77 port 51422" },
+        { "timestamp": "2026-08-19T23:02:41+00:00", "facility": "auth", "event": "sshd: Failed publickey for invalid user test from 10.20.30.91 port 44118" },
+        { "timestamp": "2026-08-20T01:30:00+00:00", "facility": "audit", "event": "USER_LOGIN uid=1000 res=success" },
+        { "timestamp": "2026-08-20T06:45:12+00:00", "facility": "audit", "event": "CONFIG_CHANGE audit rules reloaded" }
+      ]
+    }
+  }
+}

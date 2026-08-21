@@ -1,0 +1,129 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block stepper %}{% include 'partials/stepper.html' %}{% endblock %}
+{% block content %}
+
+{% set action = ctx.next_action %}
+<section class="next {{ action.tone }}" aria-labelledby="next-action">
+  <div>
+    <div class="kicker">Next recommended action</div>
+    <h2 id="next-action">{{ action.headline }}</h2>
+    <p>{{ action.detail }}</p>
+  </div>
+  <a class="btn primary go" href="{{ action.href }}">{{ action.cta }} →</a>
+</section>
+
+{% set run = ctx.latest %}
+<ul class="tiles">
+  <li>
+    <a class="tile accent" href="/registry">
+      <span class="k">Registry status</span>
+      <span class="n sm">{{ ctx.registry.label }}</span>
+      <span class="sub">
+        {% if ctx.registry.scannable %}{{ ctx.registry.approver }} · {{ ctx.registry.approved_at | ts }}
+        {% else %}{{ ctx.registry.draft_controls }} draft control(s){% endif %}
+      </span>
+    </a>
+  </li>
+  <li>
+    <a class="tile accent" href="/evidence">
+      <span class="k">Current target</span>
+      <span class="n sm">{{ ctx.target_id }}</span>
+      <span class="sub">{{ ctx.provider | upper }} provider</span>
+    </a>
+  </li>
+  <li>
+    <a class="tile accent" href="/assessment">
+      <span class="k">Latest assessment</span>
+      <span class="n sm">{{ run.stage_label if run else 'None' }}</span>
+      <span class="sub">{{ run.run_id if run else 'No run yet' }}</span>
+    </a>
+  </li>
+  <li>
+    <a class="tile fail" href="/remediation">
+      <span class="k">Open findings</span>
+      <span class="n">{{ ctx.open_findings }}</span>
+      <span class="sub">Awaiting a verified fix</span>
+    </a>
+  </li>
+  <li>
+    <a class="tile insufficient" href="/remediation?tab=EVIDENCE_RESOLUTION">
+      <span class="k">Evidence gaps</span>
+      <span class="n">{{ ctx.evidence_gaps }}</span>
+      <span class="sub">Not a security failure</span>
+    </a>
+  </li>
+  <li>
+    <a class="tile review" href="/remediation?tab=HUMAN_REVIEW">
+      <span class="k">Human review</span>
+      <span class="n">{{ ctx.human_review }}</span>
+      <span class="sub">Needs a person to decide</span>
+    </a>
+  </li>
+</ul>
+
+<div class="grid two">
+  {{ m.chart_card(
+      'Assessment verdict distribution',
+      'How the ' ~ (run.run_id if run else 'latest') ~ ' run assessed each approved control. Select a segment to open that verdict on the Assessment page.',
+      verdict_chart,
+      'No assessment has run yet.') }}
+
+  {{ m.chart_card(
+      'Evidence collection health',
+      'Whether the scan managed to collect what the registry asked for. This says nothing about compliance — an uncollected item is a gap, not a failure.',
+      evidence_chart,
+      'No evidence has been collected yet.') }}
+</div>
+
+<div class="grid two">
+  {{ m.chart_card(
+      'Control applicability',
+      'Applicability as declared by the approved registry. Conditional controls depend on a product fact that is not yet resolved.',
+      applicability_chart,
+      'No registry has been built yet.') }}
+
+  {% if trend_runs %}
+  {{ m.chart_card(
+      'Trend across comparable runs',
+      'Only runs sharing the same target and the same approved registry hash are compared. A changed baseline starts a new series instead.',
+      trend) }}
+  {% else %}
+  <section class="panel chart-card">
+    <h2>Trend across comparable runs</h2>
+    <p class="lede">A trend appears once two runs share the same target and the same approved registry hash.</p>
+    <p class="empty">Not enough comparable runs yet.</p>
+  </section>
+  {% endif %}
+</div>
+
+{% if ctx.runs %}
+<h2 class="section">Recent runs</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Run ID</th><th>Target</th><th>Provider</th><th>Stage</th>
+        <th class="num">Open</th><th class="num">Closed</th><th>Started</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in ctx.runs[:5] %}
+      <tr>
+        <td class="mono nowrap">{{ r.run_id }}</td>
+        <td>{{ r.target_id or '—' }}</td>
+        <td>{{ r.provider | upper or '—' }}</td>
+        <td>{{ r.stage_label }}</td>
+        <td class="num">{{ r.open_findings }}</td>
+        <td class="num">{{ r.verified_closed }}</td>
+        <td class="nowrap">{{ r.started_at | ts }}</td>
+        <td><a href="/runs/{{ r.run_id }}">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="pager"><span class="spacer"></span><a class="btn small" href="/reports">All runs</a></p>
+{% endif %}
+
+{% endblock %}

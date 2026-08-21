@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block content %}
+
+<p class="small"><a href="/evidence?run={{ run_id }}">← Evidence for {{ run_id }}</a></p>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{ item.evidence_id }}</h2>
+    <div class="right">{{ m.badge(item.status) }}</div>
+  </div>
+  <dl class="meta">
+    <dt>Tool</dt><dd class="mono">{{ item.tool }}</dd>
+    <dt>Target</dt><dd>{{ item.target_id }} ({{ item.provider | upper }})</dd>
+    <dt>Collected at</dt><dd>{{ item.collected_at | ts }}</dd>
+    <dt>Call ID</dt><dd class="mono">{{ item.call_id }}</dd>
+    <dt>Parameters</dt><dd class="mono wrap">{{ item.parameters_redacted or 'None' }}</dd>
+    {% if item.status_reason_code %}
+    <dt>Reason code</dt>
+    <dd class="mono">{{ item.status_reason_code.value }}
+      <div class="small muted">{{ explain(item.status_reason_code.value) }}</div>
+    </dd>
+    {% endif %}
+    {% if item.status_message %}
+    <dt>Message</dt><dd class="small">{{ item.status_message }}</dd>
+    {% endif %}
+  </dl>
+</div>
+
+<h2 class="section">Related controls</h2>
+<p class="lede">
+  One call can satisfy several approved evidence requests. Every control that asked for this result
+  is listed, so no control/evidence link is lost to deduplication.
+</p>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Control</th><th>Evidence key</th><th>Required</th></tr></thead>
+    <tbody>
+      {% for req in item.requested_by %}
+      <tr>
+        <td class="mono"><a href="/registry/control/{{ req.control_id }}">{{ req.control_id }}</a></td>
+        <td class="mono small">{{ req.evidence_key }}</td>
+        <td>{{ 'Yes' if req.required else 'No' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2 class="section">Normalized evidence</h2>
+<p class="lede">
+  The observation as the deterministic rules address it. Rules are written against these paths, not
+  against raw tool output.
+</p>
+{% if item.normalized %}
+<pre class="json">{{ item.normalized | tojson(indent=2) }}</pre>
+{% else %}
+<div class="panel"><p class="empty">Nothing was normalized for this item.</p></div>
+{% endif %}
+
+<h2 class="section">Integrity</h2>
+<div class="panel">
+  <dl class="meta">
+    <dt>Raw artifact</dt>
+    <dd class="mono wrap">{{ item.raw_artifact_ref or 'Not stored' }}</dd>
+    <dt>Raw SHA-256</dt>
+    <dd class="mono wrap">{{ item.raw_sha256 or '—' }}</dd>
+    <dt>Normalized SHA-256</dt>
+    <dd class="mono wrap">{{ item.normalized_sha256 or '—' }}</dd>
+  </dl>
+  <p class="small muted">
+    The raw artifact stays on disk under the run directory and is referenced rather than copied
+    here. Its hash is recorded so the stored evidence can be shown to be unchanged.
+  </p>
+</div>
+
+{% endblock %}

@@ -1,0 +1,21 @@
+{
+  "target_id": "nextboss-lab",
+  "provider": "ssh",
+  "host": "nextboss-lab",
+  "environment": "compliant",
+  "endpoints": {
+    "management_ui": {
+      "host": "nextboss-lab"
+    },
+    "rest_api": {
+      "host": "nextboss-lab"
+    }
+  },
+  "ssh": {
+    "host": "nextboss-lab.internal.example",
+    "port": 22,
+    "username": "cra-readonly",
+    "credential_ref": "NEXTBOSS_SSH_KEY",
+    "known_hosts_ref": "NEXTBOSS_KNOWN_HOSTS"
+  }
+}

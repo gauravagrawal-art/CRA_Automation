@@ -1,0 +1,207 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block content %}
+
+<h2 class="section">Collect evidence</h2>
+<p class="lede">
+  Collection reads the target and records what it found. It makes no compliance decision and emits
+  no verdict — that is the Assessment step. Nothing is ever written to the target.
+</p>
+
+{% if not ctx.registry.scannable %}
+<div class="notice warn">
+  A draft registry cannot be scanned against. Approve a baseline on the
+  <a href="/registry">Sources &amp; Registry</a> page first.
+</div>
+{% endif %}
+
+<div class="panel">
+  <form method="post" action="/actions/evidence/collect" class="filters"
+        data-confirm="Start evidence collection?&#10;&#10;Mode: Read-only&#10;Target modification: Disabled&#10;Registry: v{{ ctx.registry.latest_version }}">
+    <div class="field-inline">
+      <label for="target">Target</label>
+      <select id="target" name="target" required {% if not ctx.registry.scannable %}disabled{% endif %}>
+        {% for t in ctx.targets %}
+        <option value="{{ t.key }}" {% if not t.supported %}disabled{% endif %}>
+          {{ t.label }}{% if not t.supported %} — unsupported{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field-inline">
+      <label for="scenario">Mock environment</label>
+      <select id="scenario" name="scenario" {% if not ctx.registry.scannable %}disabled{% endif %}>
+        <option value="">Use target default</option>
+        {% for s in scenarios %}<option value="{{ s }}">{{ s | title }}</option>{% endfor %}
+      </select>
+    </div>
+    <button class="btn primary" type="submit" name="chain" value="evidence"
+            data-busy-label="Collecting…" {% if not ctx.registry.scannable %}disabled{% endif %}>
+      Collect evidence
+    </button>
+    <button class="btn" type="submit" name="chain" value="full"
+            data-busy-label="Running…" {% if not ctx.registry.scannable %}disabled{% endif %}>
+      Run full assessment
+    </button>
+  </form>
+
+  <p class="small muted">
+    <strong>Run full assessment</strong> chains evidence collection, the deterministic assessment and
+    remediation composition. It does not rebuild or approve the registry.
+  </p>
+
+  {% for t in ctx.targets if not t.supported %}
+  <div class="notice warn">{{ t.target_id }}: {{ t.detail }}</div>
+  {% endfor %}
+
+  <div class="callout">
+    <strong>Credentials are never entered here.</strong>
+    A target profile carries only a reference such as <span class="mono">credential_ref</span>,
+    resolved from the environment at scan time. No key or password is stored by this application.
+  </div>
+</div>
+
+{% if not run %}
+<div class="panel"><p class="empty">No evidence run yet. Collect evidence to get started.</p></div>
+{% else %}
+
+<h2 class="section">Run {{ run.run.run_id }}</h2>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Collection summary</h2>
+    <div class="right">
+      {{ m.run_picker(run_id, ctx.runs, '/evidence', filters) }}
+    </div>
+  </div>
+  <dl class="meta">
+    <dt>Target</dt><dd>{{ run.run.target_id }}</dd>
+    <dt>Provider</dt><dd>{{ run.run.provider | upper }}</dd>
+    <dt>Registry</dt><dd>v{{ run.run.registry_version }} <span class="mono small">{{ run.run.registry_hash | short(16) }}</span></dd>
+    <dt>Started</dt><dd>{{ run.run.started_at | ts }}</dd>
+    <dt>Completed</dt><dd>{{ run.run.completed_at | ts }}</dd>
+  </dl>
+</div>
+
+<ul class="tiles">
+  <li class="tile accent"><span class="k">Controls</span><span class="n">{{ run.summary.controls_in_registry }}</span></li>
+  <li class="tile accent"><span class="k">Evidence requests</span><span class="n">{{ run.summary.evidence_requests_total }}</span>
+    <span class="sub">{{ run.summary.evidence_requests_technical }} technical</span></li>
+  <li class="tile accent"><span class="k">MCP calls</span><span class="n">{{ run.summary.mcp_calls_planned }}</span>
+    <span class="sub">{{ run.summary.mcp_calls_deduplicated }} deduplicated</span></li>
+  <li class="tile pass"><span class="k">Collected</span><span class="n">{{ run.summary.by_status.get('COLLECTED', 0) }}</span></li>
+  <li class="tile insufficient"><span class="k">Not collected</span><span class="n">{{ run.summary.by_status.get('NOT_COLLECTED', 0) }}</span>
+    <span class="sub">Gap, not a failure</span></li>
+  <li class="tile fail"><span class="k">Errors</span><span class="n">{{ run.summary.collection_errors }}</span></li>
+</ul>
+
+{{ m.chart_card(
+    'Evidence collection health',
+    'Did the scan collect what the approved registry asked for? This chart describes collection outcomes only and must not be read as compliance.',
+    chart) }}
+
+{% if run.summary.by_reason_code %}
+<div class="panel">
+  <h2>Why items were not collected</h2>
+  <p class="lede">Reason codes, not compliance verdicts.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Reason code</th><th>What it means</th><th class="num">Count</th></tr></thead>
+      <tbody>
+        {% for code, count in run.summary.by_reason_code.items() %}
+        <tr>
+          <td class="mono nowrap">{{ code }}</td>
+          <td class="small muted">{{ explain(code) or '—' }}</td>
+          <td class="num">{{ count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<h2 class="section">Evidence items</h2>
+
+<form method="get" action="/evidence" class="filters">
+  <input type="hidden" name="run" value="{{ run_id }}">
+  <div class="field-inline">
+    <label for="q">Search</label>
+    <input type="search" id="q" name="q" value="{{ filters.get('q', '') }}" placeholder="Evidence ID, tool or key">
+  </div>
+  <div class="field-inline">
+    <label for="status">Status</label>
+    <select id="status" name="status">
+      <option value="">All</option>
+      {% for s in CollectionStatus %}
+      <option value="{{ s.value }}" {% if filters.get('status') == s.value %}selected{% endif %}>
+        {{ s.value.replace('_', ' ') | title }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn" type="submit">Apply</button>
+  <a class="btn" href="/evidence?run={{ run_id }}">Clear</a>
+</form>
+
+{% if items %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Evidence ID</th><th>Evidence key</th><th>Tool</th><th>Target</th><th>Status</th><th>Requested by</th><th>Collected</th></tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td class="mono nowrap"><a href="/evidence/{{ run_id }}/{{ item.evidence_id }}">{{ item.evidence_id }}</a></td>
+        <td class="small mono">{{ item.requested_by | map(attribute='evidence_key') | unique | join(', ') }}</td>
+        <td class="small mono">{{ item.tool }}</td>
+        <td class="small">{{ item.target_id }}</td>
+        <td>
+          {{ m.badge(item.status) }}
+          {% if item.status_reason_code %}<div class="small muted" title="{{ explain(item.status_reason_code.value) }}">{{ item.status_reason_code.value.replace('_', ' ') | lower }}</div>{% endif %}
+        </td>
+        <td class="small">{{ item.requested_by | map(attribute='control_id') | unique | join(', ') }}</td>
+        <td class="small nowrap">{{ item.collected_at | ts }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{{ m.pager(pager, filters, '/evidence') }}
+{% else %}
+<div class="panel"><p class="empty">No evidence items match these filters.</p></div>
+{% endif %}
+
+{% if run.collection_errors %}
+<details class="panel">
+  <summary>View technical log — {{ run.collection_errors | length }} collection error(s)</summary>
+  <div class="body">
+    <p class="small muted">Sanitized diagnostics. Secrets are redacted at the provider boundary before anything reaches disk.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Call</th><th>Tool</th><th>Status</th><th>Reason</th><th>Message</th></tr></thead>
+        <tbody>
+          {% for err in run.collection_errors %}
+          <tr>
+            <td class="mono small">{{ err.call_id }}</td>
+            <td class="mono small">{{ err.tool or '—' }}</td>
+            <td>{{ m.badge(err.status) }}</td>
+            <td class="mono small">{{ err.reason_code.value }}</td>
+            <td class="small">{{ err.message }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</details>
+{% endif %}
+
+<div class="callout">
+  This page shows collection outcomes only. Open the
+  <a href="/assessment?run={{ run_id }}">Assessment</a> page to see what the evidence means.
+</div>
+
+{% endif %}
+{% endblock %}

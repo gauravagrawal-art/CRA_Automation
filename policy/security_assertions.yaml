@@ -1,0 +1,84 @@
+metadata:
+  name: NextBoss-XT POC Security Assertions
+  version: "1.0"
+  source_type: INTERNAL_TECHNICAL_BASELINE
+
+tls:
+  disallowed_protocols:
+    - TLSv1.0
+    - TLSv1.1
+
+  disallowed_cipher_patterns:
+    - RC4
+    - 3DES
+    - "NULL"
+    - EXPORT
+    - anonymous
+
+  certificate:
+    must_not_be_expired: true
+
+network:
+  expected_ports:
+    - 22
+    - 443
+    - 8443
+    - 5432
+
+  unexpected_listener_action: REVIEW
+
+ssh:
+  assertions:
+    - id: SSH-ROOT-LOGIN
+      key: PermitRootLogin
+      allowed:
+        - "no"
+        - "prohibit-password"
+
+    - id: SSH-EMPTY-PASSWORDS
+      key: PermitEmptyPasswords
+      allowed:
+        - "no"
+
+postgresql:
+  assertions:
+    - id: POSTGRES-NOT-PUBLIC
+      description: PostgreSQL should not be unintentionally exposed on a public interface.
+
+authentication:
+  assertions:
+    - id: AUTH-LOCAL-USERS
+      description: Collect local and privileged accounts.
+
+    - id: AUTH-LDAP
+      description: Collect evidence that LDAP authentication is configured.
+
+authorization:
+  assertions:
+    - id: AUTHZ-PRIVILEGED-GROUPS
+      description: Collect privileged group membership.
+
+files:
+  assertions:
+    - id: FILE-CONFIG-PERMISSIONS
+      disallow_world_writable: true
+
+firewall:
+  assertions:
+    - id: FIREWALL-STATE
+      description: Collect firewall rules protecting management and database interfaces.
+
+services:
+  assertions:
+    - id: SERVICE-INVENTORY
+      description: Collect running and enabled services.
+
+packages:
+  assertions:
+    - id: PACKAGE-INVENTORY
+      description: Collect package and version inventory.
+
+logging:
+  assertions:
+    - id: SECURITY-LOGGING
+      required: true

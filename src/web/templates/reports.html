@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block stepper %}{% endblock %}
+{% block content %}
+
+<h2 class="section">Run history</h2>
+<p class="lede">
+  Every evidence run this workspace has produced, with the furthest workflow step it reached.
+  Artifacts stay on disk; this page only lists them.
+</p>
+
+{% if not runs %}
+<div class="panel"><p class="empty">No runs yet. Collect evidence to create the first one.</p></div>
+{% else %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Run ID</th>
+        <th>Target</th>
+        <th>Provider</th>
+        <th>Registry</th>
+        <th>Started</th>
+        <th>Assessment</th>
+        <th class="num">Open</th>
+        <th>Report</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in runs %}
+      <tr>
+        <td class="mono nowrap"><a href="/runs/{{ r.run_id }}">{{ r.run_id }}</a></td>
+        <td>{{ r.target_id or '—' }}</td>
+        <td>{{ r.provider | upper or '—' }}</td>
+        <td class="small">
+          {% if r.registry_version %}v{{ r.registry_version }}{% else %}—{% endif %}
+          {% if r.registry_hash %}<div class="mono muted">{{ r.registry_hash | short(12) }}</div>{% endif %}
+        </td>
+        <td class="nowrap small">{{ r.started_at | ts }}</td>
+        <td>
+          {{ r.assessment_result }}
+          <div class="small muted">{{ r.stage_label }}</div>
+        </td>
+        <td class="num">{{ r.open_findings }}</td>
+        <td class="nowrap small">
+          <a href="/runs/{{ r.run_id }}">Open</a>
+          {% if r.has_assessment %}
+            · <a href="/runs/{{ r.run_id }}/artifact/assessment.json">JSON</a>
+            · <a href="/runs/{{ r.run_id }}/artifact/assessment.html">HTML</a>
+          {% endif %}
+          {% if r.has_evidence %}
+            · <a href="/evidence?run={{ r.run_id }}">Evidence</a>
+          {% endif %}
+          {% if r.has_remediation %}
+            · <a href="/remediation?run={{ r.run_id }}">Remediation</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% endblock %}

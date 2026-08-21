@@ -1,0 +1,337 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block content %}
+
+{% if load_error %}
+<div class="notice error" role="alert">{{ load_error }}</div>
+{% endif %}
+
+<h2 class="section">Source documents</h2>
+<p class="lede">
+  The authorities Agent 1 read to propose controls. Higher authority wins where sources disagree;
+  a document is only cited by hash, so a changed file is a new source rather than a silent edit.
+</p>
+
+{% if documents %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Document</th><th>Authority</th><th>Status</th><th>Version</th><th>Hash</th><th>Pages</th></tr>
+    </thead>
+    <tbody>
+      {% for d in documents %}
+      <tr>
+        <td>
+          <strong>{{ d.document_id }}</strong>
+          <div class="small muted">{{ d.title }}</div>
+          <div class="small muted mono">{{ d.filename }}</div>
+        </td>
+        <td class="nowrap">
+          {{ d.binding_status.replace('_', ' ') | title }}
+          <div class="small muted">Level {{ d.authority_level }} · {{ d.tier }}</div>
+        </td>
+        <td class="nowrap">
+          {% if d.present %}<span class="chip on">Processed</span>{% else %}<span class="chip warn">Missing</span>{% endif %}
+          <div class="small muted">{{ d.document_status | title }}</div>
+        </td>
+        <td class="nowrap">{{ d.version_date or '—' }}</td>
+        <td class="mono small">{{ d.sha256 | short(16) }}</td>
+        <td class="num">{{ d.page_count or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="small muted">
+  Documents are read from <span class="mono">documents/authoritative/</span> and
+  <span class="mono">documents/supporting/</span>. Add or replace a file there and rebuild the draft;
+  this UI does not accept uploads to arbitrary locations.
+</p>
+{% else %}
+<div class="panel"><p class="empty">No document registry yet. Build the draft registry below.</p></div>
+{% endif %}
+
+<h2 class="section">Product context</h2>
+<p class="lede">
+  What NextBoss-XT is, as declared in the product profile. Unresolved values stay unresolved:
+  Agent 1 never invents a path, and an unresolved parameter makes its evidence request fail closed.
+</p>
+
+{% if profile %}
+<div class="grid three">
+  <div class="panel">
+    <div class="label small muted">Platform</div>
+    <div><strong>{{ profile.platform.operating_system }}</strong></div>
+    <div class="small muted">{{ profile.product.type }} · CRA Class {{ profile.cra_context.class_ }} Category {{ profile.cra_context.category }}</div>
+  </div>
+  {% for iface in profile.interfaces %}
+  <div class="panel">
+    <div class="label small muted">{{ iface.name }}</div>
+    <div><strong>{{ iface.protocol }} :{{ iface.port }}</strong></div>
+    <div class="small muted">{{ iface.type.replace('_', ' ') }}</div>
+  </div>
+  {% endfor %}
+  <div class="panel">
+    <div class="label small muted">Authentication</div>
+    <div><strong>{{ profile.authentication.mechanisms | join(' + ') | replace('_', ' ') }}</strong></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Configuration paths</h2>
+  <p class="lede">Each unresolved path blocks the evidence that depends on it.</p>
+  <dl class="meta">
+    {% for label, value in [
+        ('TLS config', profile.configuration.tls_config_file),
+        ('Application config', profile.configuration.application_config),
+        ('SSH config', profile.configuration.ssh_config_file),
+        ('PostgreSQL config', profile.configuration.postgres_config_file)] %}
+    <dt>{{ label }}</dt>
+    <dd>
+      {% if value == '<TO_BE_PROVIDED>' %}
+        <span class="chip warn">Needs product input</span>
+      {% else %}
+        <span class="mono">{{ value }}</span>
+      {% endif %}
+    </dd>
+    {% endfor %}
+  </dl>
+</div>
+{% else %}
+<div class="notice error">{{ profile_error }}</div>
+{% endif %}
+
+<h2 class="section">Registry actions</h2>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Current registry</h2>
+    <div class="right">
+      <span class="badge {{ ctx.registry.status }}" title="{{ explain(ctx.registry.status) }}">{{ ctx.registry.status }}</span>
+    </div>
+  </div>
+  <dl class="meta">
+    <dt>Draft</dt>
+    <dd>
+      {% if ctx.registry.draft_exists %}
+        {{ ctx.registry.draft_controls }} control(s), generated {{ ctx.registry.draft_generated_at | ts }}
+      {% else %}Not built{% endif %}
+    </dd>
+    <dt>Approved versions</dt>
+    <dd>{{ ctx.registry.approved_versions | join(', ') if ctx.registry.approved_versions else 'None' }}</dd>
+    {% if ctx.registry.latest_hash %}
+    <dt>Baseline hash</dt>
+    <dd class="mono wrap">{{ ctx.registry.latest_hash }}</dd>
+    <dt>Approved by</dt>
+    <dd>{{ ctx.registry.approver }} on {{ ctx.registry.approved_at | ts }}</dd>
+    {% endif %}
+  </dl>
+
+  <div class="btn-row" style="margin-top: 1rem">
+    <form method="post" action="/actions/registry/build"
+          data-confirm="Rebuild the draft registry from the source documents?{{ '\n\nThis replaces the current draft. Approved baselines are immutable and are not affected.' if ctx.registry.draft_exists else '' }}">
+      <button class="btn" type="submit" data-busy-label="Building…">Build draft registry</button>
+    </form>
+
+    <form method="post" action="/actions/registry/validate">
+      <button class="btn" type="submit" data-busy-label="Validating…"
+              {% if not ctx.registry.draft_exists %}disabled{% endif %}>Validate registry</button>
+    </form>
+  </div>
+
+  {% if validation.ran %}
+    {% if validation.stale %}
+    <div class="notice warn">The draft changed after the last validation. Validate it again before approving.</div>
+    {% elif validation.report.ok %}
+    <div class="notice success">
+      Validation passed {{ validation.checked_at | ts }}
+      {% if validation.report.warnings %} with {{ validation.report.warnings | length }} warning(s){% endif %}.
+    </div>
+    {% else %}
+    <div class="notice error">
+      Validation found {{ validation.report.errors | length }} error(s). Approval is blocked.
+    </div>
+    {% endif %}
+
+    {% if validation.report.errors %}
+    <details>
+      <summary>{{ validation.report.errors | length }} error(s)</summary>
+      <div class="body"><ul class="small">{% for e in validation.report.errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+    </details>
+    {% endif %}
+    {% if validation.report.warnings %}
+    <details>
+      <summary>{{ validation.report.warnings | length }} warning(s)</summary>
+      <div class="body"><ul class="small">{% for w in validation.report.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>
+    </details>
+    {% endif %}
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Approve registry</h2>
+  <p class="lede">
+    Approval writes a read-only, versioned baseline and its hash manifest. It is the gate that lets a
+    scan run: a draft is always refused. An existing approved version is never overwritten.
+  </p>
+
+  {% if not validation.approved_allowed %}
+  <div class="notice warn">{{ validation.gate_reason }}</div>
+  {% endif %}
+
+  {% if blocking_conflicts %}
+  <div class="notice warn">
+    {{ blocking_conflicts | length }} unresolved blocking conflict(s). Approval is refused
+    unless you check <strong>Allow unresolved conflicts</strong> below
+    (same as CLI <span class="mono">--allow-conflicts</span>).
+    <details style="margin-top: .5rem">
+      <summary>{{ blocking_conflicts | length }} conflict(s)</summary>
+      <div class="body">
+        <ul class="small">
+          {% for c in blocking_conflicts %}
+          <li>
+            <strong class="mono">{{ c.conflict_id }}</strong> — {{ c.description }}
+            {% if c.precedence_applied %}
+            <div class="muted">Precedence applied: {{ c.precedence_applied }}</div>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </details>
+  </div>
+  {% endif %}
+
+  <form method="post" action="/actions/registry/approve" class="approve-form"
+        data-confirm="Approve this draft as an immutable baseline?&#10;&#10;This cannot be undone or edited afterwards. Scans will run against it.&#10;&#10;If Allow unresolved conflicts is checked, those blocking conflicts are accepted as-is in this baseline.">
+    <div class="btn-row">
+      <div class="field-inline">
+        <label for="approver">Approver name</label>
+        <input type="text" id="approver" name="approver" required placeholder="Your name"
+               {% if not validation.approved_allowed %}disabled{% endif %}>
+      </div>
+      <div class="field-inline">
+        <label for="version">Version</label>
+        <input type="text" id="version" name="version" required value="{{ next_version }}"
+               pattern="\d+\.\d+\.\d+" title="Semantic version, e.g. 1.2.0"
+               {% if not validation.approved_allowed %}disabled{% endif %}>
+      </div>
+      <button class="btn primary" type="submit" data-busy-label="Approving…"
+              {% if not validation.approved_allowed %}disabled{% endif %}>Approve registry</button>
+    </div>
+    <label class="check">
+      <input type="checkbox" name="allow_conflicts" value="true"
+             {% if not validation.approved_allowed %}disabled{% endif %}>
+      <span>Allow unresolved conflicts</span>
+    </label>
+    <p class="small muted">
+      Overrides blocking document conflicts for this approval only. Review the conflicts above
+      before enabling.
+    </p>
+  </form>
+</div>
+
+<details class="panel">
+  <summary>Advanced — equivalent CLI</summary>
+  <div class="body">
+    <p class="small muted">You do not need to run these. They are the same functions this page calls.</p>
+    <pre class="json">nextboss-cra ingest
+nextboss-cra validate-registry
+nextboss-cra review-registry
+nextboss-cra approve-registry --approver "Your Name" --version {{ next_version }}
+nextboss-cra approve-registry --approver "Your Name" --version {{ next_version }} --allow-conflicts</pre>
+  </div>
+</details>
+
+<h2 class="section">Control registry</h2>
+<p class="lede">
+  The {{ registry_source }} registry holds {{ total_controls }} control(s). Each one traces a CRA
+  requirement through its ETSI mapping to the evidence a scan will collect.
+</p>
+
+<form method="get" action="/registry" class="filters">
+  <div class="field-inline">
+    <label for="q">Search</label>
+    <input type="search" id="q" name="q" value="{{ filters.get('q', '') }}" placeholder="Control ID or title">
+  </div>
+  <div class="field-inline">
+    <label for="cra">CRA requirement</label>
+    <select id="cra" name="cra">
+      <option value="">All</option>
+      {% for p in cra_points %}
+      <option value="{{ p }}" {% if filters.get('cra') == p %}selected{% endif %}>{{ p }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field-inline">
+    <label for="applicability">Applicability</label>
+    <select id="applicability" name="applicability">
+      <option value="">All</option>
+      {% for s in ApplicabilityStatus %}
+      <option value="{{ s.value }}" {% if filters.get('applicability') == s.value %}selected{% endif %}>
+        {{ s.value.replace('_', ' ') | title }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field-inline">
+    <label for="mode">Evidence</label>
+    <select id="mode" name="mode">
+      <option value="">All</option>
+      {% for s in EvidenceMode %}
+      <option value="{{ s.value }}" {% if filters.get('mode') == s.value %}selected{% endif %}>
+        {{ s.value.replace('_', ' ') | title }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field-inline">
+    <label for="review">Human review</label>
+    <select id="review" name="review">
+      <option value="">All</option>
+      <option value="yes" {% if filters.get('review') == 'yes' %}selected{% endif %}>Required</option>
+      <option value="no" {% if filters.get('review') == 'no' %}selected{% endif %}>Not required</option>
+    </select>
+  </div>
+  <button class="btn" type="submit">Apply</button>
+  <a class="btn" href="/registry">Clear</a>
+</form>
+
+{% if controls %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Control</th><th>CRA</th><th>ETSI</th><th>Title</th>
+        <th>Applicability</th><th>Evidence</th><th>Evaluation</th><th>Review</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in controls %}
+      <tr>
+        <td class="mono nowrap"><a href="/registry/control/{{ c.control_id }}">{{ c.control_id }}</a></td>
+        <td class="nowrap small">{{ c.title.split(':')[0].replace('CRA ', '') }}</td>
+        <td class="small">{{ c.etsi_requirement_ids | join(', ') or '—' }}</td>
+        <td>{{ c.title.split(':', 1)[1] | trim if ':' in c.title else c.title }}</td>
+        <td>{{ m.badge(c.applicability.status) }}</td>
+        <td class="small">
+          {{ c.evidence_plan | length }} item(s)
+          {% set unresolved = c.evidence_plan | selectattr('parameter_status.value', 'equalto', 'TO_BE_PROVIDED') | list %}
+          {% if unresolved %}<div><span class="chip warn">{{ unresolved | length }} unresolved</span></div>{% endif %}
+        </td>
+        <td class="small nowrap" title="{{ explain(c.evaluation.mode.value) }}">
+          {{ c.evaluation.mode.value.replace('_', ' ') | title }}
+          <div class="muted">{{ c.evaluation.rules | length }} rule(s)</div>
+        </td>
+        <td>{% if c.human_review_required %}<span class="chip warn">Yes</span>{% else %}<span class="chip">No</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{{ m.pager(pager, filters, '/registry') }}
+{% else %}
+<div class="panel"><p class="empty">No controls match these filters.</p></div>
+{% endif %}
+
+{% endblock %}

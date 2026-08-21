@@ -1,0 +1,206 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block content %}
+
+<p class="small"><a href="/registry">← Control registry</a></p>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{ control.control_id }}</h2>
+    <div class="right">
+      {{ m.badge(control.applicability.status) }}
+      {% if control.human_review_required %}<span class="chip warn">Human review required</span>{% endif %}
+      <span class="chip">Confidence {{ control.confidence.value | title }}</span>
+    </div>
+  </div>
+  <p class="lede">{{ control.title }}</p>
+
+  <div class="field">
+    <div class="label">What this means for NextBoss-XT</div>
+    <p>{{ control.nms_interpretation }}</p>
+  </div>
+  <div class="field">
+    <div class="label">Technical control</div>
+    <p>{{ control.technical_control }}</p>
+  </div>
+  <div class="field">
+    <div class="label">Applicability</div>
+    <p>{{ control.applicability.reason }}</p>
+    {% if control.applicability.assumptions %}
+    <ul class="small muted">{% for a in control.applicability.assumptions %}<li>{{ a }}</li>{% endfor %}</ul>
+    {% endif %}
+  </div>
+</div>
+
+<h2 class="section">How this control was derived</h2>
+<p class="lede">
+  Each step below is recorded in the registry, so the path from binding law to a scan parameter can
+  be followed without reading the source PDFs.
+</p>
+
+<div class="panel">
+  <ol class="chain">
+    <li>
+      <div class="step-k">CRA requirement</div>
+      <div class="step-v">
+        {{ cra_point or '—' }} — {{ control.legal_requirement.normalized_requirement }}
+        {% if control.source_traceability.legal_sources %}
+          {% set src = control.source_traceability.legal_sources[0] %}
+          <div class="small muted">{{ src.document_id }}, page {{ src.source_locator.page }}</div>
+        {% endif %}
+      </div>
+    </li>
+    <li>
+      <div class="step-k">Category 6 classification</div>
+      <div class="step-v">
+        {% if control.source_traceability.classification_sources %}
+          {% set src = control.source_traceability.classification_sources[0] %}
+          {{ src.normalized_summary or src.document_id }}
+          <div class="small muted">{{ src.document_id }}, page {{ src.source_locator.page }}</div>
+        {% else %}<span class="muted">Not cited for this control</span>{% endif %}
+      </div>
+    </li>
+    <li>
+      <div class="step-k">ETSI requirement</div>
+      <div class="step-v">
+        {% if control.etsi_requirement_ids %}
+          <span class="mono">{{ control.etsi_requirement_ids | join(', ') }}</span>
+        {% else %}<span class="muted">No ETSI mapping recorded</span>{% endif %}
+        {% for src in control.source_traceability.technical_reference_sources %}
+        <div class="small muted">{{ src.document_id }} clause {{ src.source_locator.section or src.source_locator.clause or '—' }}</div>
+        {% endfor %}
+      </div>
+    </li>
+    <li>
+      <div class="step-k">Applicability</div>
+      <div class="step-v">{{ m.badge(control.applicability.status) }}</div>
+    </li>
+    <li>
+      <div class="step-k">NextBoss component</div>
+      <div class="step-v">
+        {% if control.target_context and control.target_context.components %}
+          {% for comp in control.target_context.components %}
+          <div>
+            {{ comp.component }}
+            {% if comp.protocol %}— {{ comp.protocol }}{% endif %}{% if comp.port %} :{{ comp.port }}{% endif %}
+            {% if comp.config_path == '<TO_BE_PROVIDED>' %}<span class="chip warn">config path needs product input</span>{% endif %}
+          </div>
+          {% endfor %}
+          <div class="small muted">Platform {{ control.target_context.platform }}</div>
+        {% else %}<span class="muted">Host-level control</span>{% endif %}
+      </div>
+    </li>
+    <li>
+      <div class="step-k">Evidence plan</div>
+      <div class="step-v">{{ control.evidence_plan | length }} evidence request(s), listed below</div>
+    </li>
+    <li>
+      <div class="step-k">Assessment</div>
+      <div class="step-v" title="{{ explain(control.evaluation.mode.value) }}">
+        {{ control.evaluation.mode.value.replace('_', ' ') | title }} —
+        {{ control.evaluation.rules | length }} approved rule group(s)
+      </div>
+    </li>
+  </ol>
+</div>
+
+<h2 class="section">Evidence plan</h2>
+<p class="lede">Exactly what a scan will request for this control. Nothing outside this plan is collected.</p>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Evidence key</th><th>Mode</th><th>MCP tool</th><th>Parameters</th><th>Required</th></tr>
+    </thead>
+    <tbody>
+      {% for item in control.evidence_plan %}
+      <tr>
+        <td class="mono">{{ item.evidence_key }}<div class="small muted">{{ item.description }}</div></td>
+        <td>{{ m.badge(item.mode) }}</td>
+        <td class="mono small">
+          {{ item.mcp_tool or '—' }}
+          {% if item.tool_status.value != 'AVAILABLE' %}<div><span class="chip warn">{{ item.tool_status.value.replace('_', ' ') | title }}</span></div>{% endif %}
+        </td>
+        <td class="small">
+          {% if item.parameter_status.value == 'TO_BE_PROVIDED' %}
+            <span class="chip warn" title="{{ explain('PARAMETER_UNRESOLVED') }}">Unresolved</span>
+          {% elif item.parameters %}
+            <span class="mono">{{ item.parameters }}</span>
+          {% else %}<span class="muted">None</span>{% endif %}
+        </td>
+        <td>{{ 'Yes' if item.required else 'No' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2 class="section">Technical detail</h2>
+
+<details class="panel">
+  <summary>Source excerpts</summary>
+  <div class="body">
+    {% for label, refs in [
+        ('Binding legal sources', control.source_traceability.legal_sources),
+        ('Classification sources', control.source_traceability.classification_sources),
+        ('Guidance sources', control.source_traceability.guidance_sources),
+        ('Technical reference sources', control.source_traceability.technical_reference_sources)] %}
+      {% if refs %}
+      <h3 class="small">{{ label }}</h3>
+      {% for ref in refs %}{{ m.source_ref(ref) }}{% endfor %}
+      {% endif %}
+    {% endfor %}
+  </div>
+</details>
+
+<details class="panel">
+  <summary>Assessment rules</summary>
+  <div class="body">
+    <p class="small muted">
+      These approved conditions are what the deterministic evaluator runs. A verdict can only come
+      from evaluating them; no model contributes to it.
+    </p>
+    <pre class="json">{{ control.evaluation.rules | tojson(indent=2) }}</pre>
+    {% if control.assertion_refs %}
+    <div class="field">
+      <div class="label">Policy assertions referenced</div>
+      <ul class="small mono">{% for r in control.assertion_refs %}<li>{{ r }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </div>
+</details>
+
+<details class="panel">
+  <summary>MCP mapping</summary>
+  <div class="body">
+    <p class="small muted">
+      The read-only capabilities this control may invoke. There is no shell tool, and no argument
+      accepts a command string.
+    </p>
+    <ul class="small mono">
+      {% for tool in control.evidence_plan | map(attribute='mcp_tool') | select | unique %}
+      <li>{{ tool }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+</details>
+
+<details class="panel">
+  <summary>Remediation seed</summary>
+  <div class="body">
+    <p>{{ control.remediation_seed.recommendation }}</p>
+    {% if control.remediation_seed.verification_evidence_keys %}
+    <div class="field">
+      <div class="label">Evidence that must be recollected to verify a fix</div>
+      <ul class="small mono">
+        {% for k in control.remediation_seed.verification_evidence_keys %}<li>{{ k }}</li>{% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    <p class="small muted">
+      This text is copied verbatim into any finding for this control. Nothing is composed and no
+      command is generated.
+    </p>
+  </div>
+</details>
+
+{% endblock %}

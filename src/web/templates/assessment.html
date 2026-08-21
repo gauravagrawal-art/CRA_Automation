@@ -1,0 +1,145 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block content %}
+
+{% if unassessed %}
+<div class="panel">
+  <h2>Evidence waiting to be assessed</h2>
+  <p class="lede">These runs collected evidence but no verdicts have been produced from them yet.</p>
+  {% for r in unassessed %}
+  <form method="post" action="/actions/assessment/run" class="inline" style="margin-bottom:.4rem">
+    <input type="hidden" name="run_id" value="{{ r.run_id }}">
+    <span class="mono small">{{ r.run_id }}</span>
+    <span class="small muted">{{ r.target_id }} · {{ r.started_at | ts }}</span>
+    <button class="btn small primary" type="submit" data-busy-label="Assessing…">Run assessment</button>
+  </form>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if not assessment %}
+<div class="panel">
+  <p class="empty">
+    No assessment yet. Collect evidence on the <a href="/evidence">Evidence</a> page, then assess it.
+  </p>
+</div>
+{% else %}
+
+{% set meta = assessment.metadata %}
+{% set s = assessment.summary %}
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Assessment {{ meta.assessment_id }}</h2>
+    <div class="right">
+      {{ m.run_picker(run_id, ctx.runs | selectattr('has_assessment') | list, '/assessment', filters) }}
+      <a class="btn small" href="/runs/{{ run_id }}">Full report</a>
+    </div>
+  </div>
+  <dl class="meta">
+    <dt>Run</dt><dd class="mono">{{ meta.run_id }}</dd>
+    <dt>Target</dt><dd>{{ meta.target_id }} ({{ meta.provider | upper }})</dd>
+    <dt>Registry</dt><dd>v{{ meta.registry_version }} <span class="mono small">{{ meta.registry_hash | short(16) }}</span></dd>
+    <dt>Generated</dt><dd>{{ meta.generated_at | ts }}</dd>
+    <dt>AI narration</dt><dd>{{ meta.llm_narration }}</dd>
+  </dl>
+</div>
+
+<ul class="tiles">
+  <li><a class="tile accent" href="/assessment?run={{ run_id }}"><span class="k">Total controls</span><span class="n">{{ s.total }}</span></a></li>
+  <li><a class="tile pass" href="/assessment?run={{ run_id }}&verdict=PASS"><span class="k">Pass</span><span class="n">{{ s.passed }}</span></a></li>
+  <li><a class="tile fail" href="/assessment?run={{ run_id }}&verdict=FAIL"><span class="k">Fail</span><span class="n">{{ s.fail }}</span></a></li>
+  <li><a class="tile partial" href="/assessment?run={{ run_id }}&verdict=PARTIAL"><span class="k">Partial</span><span class="n">{{ s.partial }}</span></a></li>
+  <li><a class="tile insufficient" href="/assessment?run={{ run_id }}&verdict=INSUFFICIENT_EVIDENCE"><span class="k">Insufficient evidence</span><span class="n">{{ s.insufficient_evidence }}</span><span class="sub">Not a failure</span></a></li>
+  <li><a class="tile review" href="/assessment?run={{ run_id }}&verdict=HUMAN_REVIEW_REQUIRED"><span class="k">Human review</span><span class="n">{{ s.human_review_required }}</span></a></li>
+</ul>
+
+{{ m.chart_card(
+    'Verdict distribution',
+    'Every verdict comes from the deterministic rule engine evaluating the approved rules. Select a segment to filter the table below.',
+    chart) }}
+
+{% if assessment.limitations %}
+<div class="panel">
+  <h2>Limitations of this assessment</h2>
+  <p class="lede">Recorded by the application so the result is not read as broader than it is.</p>
+  <ul class="small">
+    {% for lim in assessment.limitations %}
+    <li>
+      <span class="mono">{{ lim.code.value }}</span> — {{ lim.detail }}
+      {% if lim.control_ids %}<span class="muted">({{ lim.control_ids | length }} control(s))</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<h2 class="section">Assessed controls</h2>
+
+<form method="get" action="/assessment" class="filters">
+  <input type="hidden" name="run" value="{{ run_id }}">
+  <div class="field-inline">
+    <label for="q">Search</label>
+    <input type="search" id="q" name="q" value="{{ filters.get('q', '') }}" placeholder="Control ID or title">
+  </div>
+  <div class="field-inline">
+    <label for="verdict">Verdict</label>
+    <select id="verdict" name="verdict">
+      <option value="">All</option>
+      {% for v in VERDICT_ORDER %}
+      <option value="{{ v.value }}" {% if filters.get('verdict') == v.value %}selected{% endif %}>
+        {{ v.value.replace('_', ' ') | title }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field-inline">
+    <label for="mode">Evaluation</label>
+    <select id="mode" name="mode">
+      <option value="">All</option>
+      <option value="DETERMINISTIC" {% if filters.get('mode') == 'DETERMINISTIC' %}selected{% endif %}>Deterministic</option>
+      <option value="HUMAN_OR_AGENT_REASONING" {% if filters.get('mode') == 'HUMAN_OR_AGENT_REASONING' %}selected{% endif %}>Human reasoning</option>
+    </select>
+  </div>
+  <div class="field-inline">
+    <label for="review">Human review</label>
+    <select id="review" name="review">
+      <option value="">All</option>
+      <option value="yes" {% if filters.get('review') == 'yes' %}selected{% endif %}>Flagged</option>
+    </select>
+  </div>
+  <button class="btn" type="submit">Apply</button>
+  <a class="btn" href="/assessment?run={{ run_id }}">Clear</a>
+</form>
+
+{% if results %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Control</th><th>Title</th><th>Verdict</th><th>Expected</th><th>Observed</th><th>Evidence</th><th>Review</th></tr>
+    </thead>
+    <tbody>
+      {% for r in results %}
+      <tr>
+        <td class="mono nowrap"><a href="/assessment/control/{{ r.control_id }}?run={{ run_id }}">{{ r.control_id }}</a></td>
+        <td>{{ r.title.split(':', 1)[1] | trim if ':' in r.title else r.title }}</td>
+        <td>{{ m.badge(r.verdict) }}</td>
+        <td class="small muted">{{ r.expected_state | truncate(90) }}</td>
+        <td class="small muted">{{ r.observed_state | truncate(90) if r.observed_state else '—' }}</td>
+        <td class="small nowrap">
+          {{ r.evidence_ids | length }} item(s)
+          {% if r.evidence_gaps %}<div><span class="chip warn">{{ r.evidence_gaps | length }} gap(s)</span></div>{% endif %}
+        </td>
+        <td>{% if r.registry_human_review_flag %}<span class="chip warn">Yes</span>{% else %}<span class="chip">No</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{{ m.pager(pager, filters, '/assessment') }}
+{% else %}
+<div class="panel"><p class="empty">No controls match these filters.</p></div>
+{% endif %}
+
+{% endif %}
+{% endblock %}

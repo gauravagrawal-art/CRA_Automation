@@ -1,0 +1,96 @@
+{# Shared building blocks. A status is always rendered with its text label, and
+   carries its plain-language explanation as a tooltip where one exists. #}
+
+{% macro badge(value) %}
+  {%- set text = value.value if value.value is defined else value -%}
+  <span class="badge {{ text }}" title="{{ explain(text) }}">{{ text.replace('_', ' ') }}</span>
+{%- endmacro %}
+
+{% macro why(term, label='Why?') %}
+  {%- set text = explain(term) -%}
+  {%- if text -%}
+  <details class="why">
+    <summary>{{ label }}</summary>
+    <div class="body small muted">{{ text }}</div>
+  </details>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro chart_card(title, description, chart, empty_text='Nothing to show yet.') %}
+<section class="panel chart-card">
+  <h2>{{ title }}</h2>
+  <p class="lede">{{ description }}</p>
+  {% if chart.empty %}
+    <p class="empty">{{ empty_text }}</p>
+  {% else %}
+    <div class="figure">{{ chart.svg | safe }}</div>
+    <ul class="legend">
+      {% for seg in chart.segments %}
+      <li class="{% if not seg.value %}zero{% endif %}">
+        <span class="sw" style="background: {{ seg.color }}" aria-hidden="true"></span>
+        {% if seg.value and seg.href %}<a href="{{ seg.href }}">{{ seg.display }} {{ seg.value }}</a>
+        {% else %}{{ seg.display }} {{ seg.value }}{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="alt">{{ chart.summary }}</p>
+  {% endif %}
+</section>
+{% endmacro %}
+
+{% macro pager(meta, params, base='') %}
+{% if meta.show %}
+<nav class="pager" aria-label="Pagination">
+  <span>Showing {{ meta.start }}–{{ meta.end }} of {{ meta.total }}</span>
+  <span class="spacer"></span>
+  {% if meta.page > 1 %}
+    <a class="btn small" href="{{ base }}{{ query(params, page=meta.page - 1) }}">Previous</a>
+  {% else %}
+    <span class="btn small" aria-disabled="true">Previous</span>
+  {% endif %}
+  <span>Page {{ meta.page }} of {{ meta.pages }}</span>
+  {% if meta.page < meta.pages %}
+    <a class="btn small" href="{{ base }}{{ query(params, page=meta.page + 1) }}">Next</a>
+  {% else %}
+    <span class="btn small" aria-disabled="true">Next</span>
+  {% endif %}
+</nav>
+{% elif meta.total %}
+<p class="pager"><span>{{ meta.total }} row{{ '' if meta.total == 1 else 's' }}</span></p>
+{% endif %}
+{% endmacro %}
+
+{% macro source_ref(ref) %}
+<div class="field">
+  <div class="label">{{ ref.document_id }}{% if ref.binding_status %} · {{ ref.binding_status.replace('_', ' ') | lower }}{% endif %}</div>
+  {% if ref.normalized_summary %}<div class="small">{{ ref.normalized_summary }}</div>{% endif %}
+  {% set loc = ref.source_locator %}
+  {% set bits = [] %}
+  {% if loc.page %}{% set _ = bits.append('page ' ~ loc.page) %}{% endif %}
+  {% if loc.annex %}{% set _ = bits.append('Annex ' ~ loc.annex) %}{% endif %}
+  {% if loc.part %}{% set _ = bits.append('Part ' ~ loc.part) %}{% endif %}
+  {% if loc.section %}{% set _ = bits.append('section ' ~ loc.section) %}{% endif %}
+  {% if loc.paragraph %}{% set _ = bits.append('paragraph ' ~ loc.paragraph) %}{% endif %}
+  {% if loc.clause %}{% set _ = bits.append('clause ' ~ loc.clause) %}{% endif %}
+  {% if bits %}<div class="small muted">{{ bits | join(' · ') }}</div>{% endif %}
+  {% if ref.source_excerpt %}<blockquote class="excerpt">{{ ref.source_excerpt }}</blockquote>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro run_picker(run_id, runs, base, params) %}
+{% if runs | length > 1 %}
+<form method="get" action="{{ base }}" class="inline">
+  <div class="field-inline">
+    <label for="run-pick">Run</label>
+    <select id="run-pick" name="run" onchange="this.form.submit()">
+      {% for r in runs %}
+      <option value="{{ r.run_id }}" {% if r.run_id == run_id %}selected{% endif %}>
+        {{ r.run_id }} — {{ r.target_id }} ({{ r.stage_label }})
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <noscript><button class="btn small" type="submit">Show</button></noscript>
+</form>
+{% endif %}
+{% endmacro %}
