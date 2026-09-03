@@ -55,8 +55,9 @@ Walk through:
    (or run the full assessment chain).
 3. **Assessment** — read PASS / FAIL / evidence-gap verdicts and the
    evaluator trace for any control.
-4. **Remediation & Verify** — review advisory actions, then re-scan after a
-   change has been applied *outside* this application.
+4. **Remediation & Verify** — propose and approve advisory actions; apply only
+   against the demo target through an allow-listed executor; then re-scan to
+   verify. Application alone does not close a finding.
 5. **Reports** — open any historical run, download JSON, or the generated
    HTML report.
 
@@ -202,13 +203,23 @@ nextboss-cra remediate --run-id RUN-DEMO-0002 --previous-run RUN-DEMO-0001
 
 ### Verifying closure after a re-scan
 
-A system owner applies the change outside this application. Verification then
-means running Flow 2 and Flow 3 again and comparing the two assessments:
+A system owner applies the change outside this application, or — for the demo
+target only — proposes, approves and applies an allow-listed remediation action.
+Application lands in `APPLIED_UNVERIFIED` and does **not** change the assessment
+verdict or finding status. Verification then means running Flow 2 and Flow 3
+again and comparing the two assessments:
 
 ```bash
+# Optional demo path: propose → approve → apply (nextboss-demo only)
+nextboss-cra propose-remediation --run-id RUN-DEMO-0001 --control-id NMS-CRA-0006
+nextboss-cra approve-remediation --run-id RUN-DEMO-0001 --control-id NMS-CRA-0006 \
+  --approver "Your Name"
+nextboss-cra apply-remediation --run-id RUN-DEMO-0001 --control-id NMS-CRA-0006
+
 # 1. Collect evidence again into a new run
 #    (--scenario is a mock-provider convenience; a real target needs no flag)
-nextboss-cra collect-evidence --run-id RUN-DEMO-0002 --scenario compliant
+#    Keep the same scenario when testing demo overlay patches.
+nextboss-cra collect-evidence --run-id RUN-DEMO-0002 --scenario vulnerable
 
 # 2. Assess the new run
 nextboss-cra assess --run-id RUN-DEMO-0002
@@ -253,7 +264,10 @@ and matches its manifest, and the evidence and assessment both name that exact
 registry hash, the same run and the same target. Flow 4 never calls
 Infrastructure MCP: a re-scan means running Flow 2 and Flow 3 again.
 
-The status model implements `OPEN` and `VERIFIED_CLOSED` only. A finding closes
+The status model implements `OPEN` and `VERIFIED_CLOSED` only for findings.
+A separate remediation-action lifecycle (`PROPOSED` → `AWAITING_APPROVAL` →
+`APPROVED` → `APPLYING` → `APPLIED_UNVERIFIED` → `VERIFIED`, plus `FAILED` /
+`ROLLED_BACK` / `BLOCKED`) records controlled demo execution. A finding closes
 only when a later assessment returns `PASS` for the same control, on the same
 target, under the same approved registry hash, backed by evidence the new run
 actually collected. A recommendation does not close a finding and neither does

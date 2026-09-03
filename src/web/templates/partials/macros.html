@@ -16,6 +16,45 @@
   {%- endif -%}
 {%- endmacro %}
 
+{% macro impact_preview(restart, impact, component='', proposed='', rollback='', awaiting=false) %}
+{# Mock catalog fields shown before approval. LLM narration can replace these later. #}
+{% if restart or impact or component or proposed %}
+<div class="callout impact{% if awaiting %} awaiting{% endif %}">
+  {% if awaiting %}
+  <p class="label">Review before approval</p>
+  {% else %}
+  <p class="label">Impact</p>
+  {% endif %}
+  <dl class="meta">
+    <dt>Service restart</dt>
+    <dd>
+      {% if restart %}
+      <strong>Required</strong>
+      {% else %}
+      Not required
+      {% endif %}
+    </dd>
+    {% if component %}
+    <dt>Affected component</dt>
+    <dd>{{ component }}</dd>
+    {% endif %}
+    {% if impact %}
+    <dt>Possible impact</dt>
+    <dd>{{ impact }}</dd>
+    {% endif %}
+    {% if proposed %}
+    <dt>Proposed change</dt>
+    <dd>{{ proposed }}</dd>
+    {% endif %}
+    {% if rollback %}
+    <dt>Rollback</dt>
+    <dd>{{ rollback }}</dd>
+    {% endif %}
+  </dl>
+</div>
+{% endif %}
+{% endmacro %}
+
 {% macro chart_card(title, description, chart, empty_text='Nothing to show yet.') %}
 <section class="panel chart-card">
   <h2>{{ title }}</h2>

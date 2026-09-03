@@ -36,13 +36,14 @@ from src.compliance.models import (
 )
 from src.compliance.status import map_verdict, overall_status
 from src.evidence.models import EvidenceRun
+from src.config import DEMO_PROVIDER, DEMO_TARGET_ID
 from src.lifecycle.models import (
     ControlLifecycle,
     LifecycleDocument,
     LifecycleStatus,
     RemediationExecStatus,
 )
-from src.remediation.models import RemediationDocument, RemediationItem
+from src.remediation.models import ActionType, RemediationDocument, RemediationItem, RemediationStatus
 from src.services import runs_service
 from src.services.registry_service import RegistryServiceError, load_approved
 
@@ -205,11 +206,31 @@ class MockComplianceProvider:
 
             rem_applied = False
             rem_status = ""
+            proposed_change = ""
+            affected_component = ""
+            service_restart_required = False
+            risk_and_impact = ""
+            rollback_method = ""
+            rem_approver = ""
+            rem_approved_at = ""
+            finding_status = (
+                rem_item.status.value
+                if rem_item is not None
+                else RemediationStatus.OPEN.value
+            )
             analysis_decision = ""
             analysis_reason = ""
             review_history: list[ReviewHistoryEntry] = []
             can_apply = False
+            can_propose = False
+            can_approve = False
+            can_rollback = False
+            apply_blocked_reason = ""
             can_submit = False
+            target_executable = (
+                assessment.metadata.target_id == DEMO_TARGET_ID
+                and assessment.metadata.provider == DEMO_PROVIDER
+            )
 
             if life is not None:
                 if life.initial_finding:
@@ -221,13 +242,37 @@ class MockComplianceProvider:
                 if active:
                     rem_text = active.recommended_action or rem_text
                     rem_status = active.status.value
+                    proposed_change = active.proposed_change or ""
+                    affected_component = active.affected_component or ""
+                    service_restart_required = bool(active.service_restart_required)
+                    risk_and_impact = active.risk_and_impact or ""
+                    rollback_method = active.rollback_method or ""
+                    rem_approver = active.approver or ""
+                    rem_approved_at = active.approved_at or ""
                     rem_applied = active.status in (
                         RemediationExecStatus.APPLIED,
+                        RemediationExecStatus.APPLIED_UNVERIFIED,
+                        RemediationExecStatus.APPLYING,
                         RemediationExecStatus.VERIFYING,
                         RemediationExecStatus.VERIFIED,
                     )
                     if active.verification_result:
                         ver_text = active.verification_result
+                    can_approve = active.status is RemediationExecStatus.AWAITING_APPROVAL
+                    can_apply = (
+                        active.status is RemediationExecStatus.APPROVED and target_executable
+                    )
+                    can_rollback = active.status in (
+                        RemediationExecStatus.APPLIED_UNVERIFIED,
+                        RemediationExecStatus.FAILED,
+                    )
+                    if active.status is RemediationExecStatus.APPROVED and not target_executable:
+                        apply_blocked_reason = (
+                            "Apply is allow-listed only for the nextboss-demo mock target."
+                        )
+                        can_apply = False
+                    if active.status is RemediationExecStatus.BLOCKED:
+                        apply_blocked_reason = active.failure_reason or "Action is blocked."
                 if life.last_analysis:
                     analysis_decision = (
                         life.last_analysis.resolve_final().value
@@ -246,18 +291,47 @@ class MockComplianceProvider:
                             timestamp=attempt.timestamp,
                         )
                     )
-                can_apply = status in (
-                    UIStatus.FAIL,
-                    UIStatus.REMEDIATION_PENDING,
-                ) and bool(rem_text)
+                # Schema 1.0 legacy: overlay PASS after in-process verify.
+                # Schema 1.1: REMEDIATION_PENDING until Flow 4 verify closes.
                 can_submit = (
                     initial_status is UIStatus.REVIEW
                     and status
                     in (UIStatus.REVIEW, UIStatus.FAIL, UIStatus.REMEDIATION_PENDING)
                 )
             else:
-                can_apply = status is UIStatus.FAIL and bool(rem_text)
                 can_submit = status is UIStatus.REVIEW
+
+            eligible_technical = (
+                rem_item is not None
+                and rem_item.action_type is ActionType.TECHNICAL_REMEDIATION
+                and rem_item.status is RemediationStatus.OPEN
+                and engine_status is UIStatus.FAIL
+                and bool(rem_text)
+            )
+            active_status = rem_status
+            can_propose = eligible_technical and active_status in (
+                "",
+                RemediationExecStatus.PROPOSED.value,
+                RemediationExecStatus.ROLLED_BACK.value,
+                RemediationExecStatus.PENDING.value,
+            )
+            if not rem_status and eligible_technical and life is None:
+                can_propose = True
+            if life is not None and rem_status in (
+                RemediationExecStatus.AWAITING_APPROVAL.value,
+                RemediationExecStatus.APPROVED.value,
+                RemediationExecStatus.APPLYING.value,
+                RemediationExecStatus.APPLIED_UNVERIFIED.value,
+                RemediationExecStatus.VERIFIED.value,
+            ):
+                can_propose = False
+
+            # Legacy 1.0 path: allow apply button only when already APPROVED or
+            # when no action workflow yet and FAIL with rem_text (tests/UI may
+            # still hit the old single-click path via propose+approve elsewhere).
+            if not can_apply and not rem_status and status is UIStatus.FAIL and bool(rem_text):
+                # Prefer propose; do not enable apply until approved.
+                can_apply = False
 
             view = ControlView(
                 control_id=result.control_id,
@@ -277,8 +351,20 @@ class MockComplianceProvider:
                 evidence_ids=list(result.evidence_ids),
                 remediation_applied=rem_applied,
                 remediation_status=rem_status,
+                finding_status=finding_status,
                 can_apply_remediation=can_apply,
+                can_propose_remediation=can_propose,
+                can_approve_remediation=can_approve,
+                can_rollback_remediation=can_rollback,
+                apply_blocked_reason=apply_blocked_reason,
                 can_submit_evidence=can_submit,
+                proposed_change=proposed_change,
+                affected_component=affected_component,
+                service_restart_required=service_restart_required,
+                risk_and_impact=risk_and_impact,
+                rollback_method=rollback_method,
+                rem_approver=rem_approver,
+                rem_approved_at=rem_approved_at,
                 analysis_decision=analysis_decision,
                 analysis_reason=analysis_reason,
                 review_history=review_history,
@@ -323,7 +409,7 @@ class MockComplianceProvider:
                         primary,
                         rem_text,
                         ver_text,
-                        overlay_status=rem_status or None,
+                        overlay=life.remediations[-1] if life and life.remediations else None,
                     )
                 )
             elif life is not None and life.remediations and primary is not None:
@@ -342,8 +428,25 @@ class MockComplianceProvider:
                         or active.verification_method
                         or ver_text,
                         status=active.status.value,
+                        finding_status=finding_status,
+                        action_status=active.status.value,
                         action_type=active.origin.value,
                         evidence_ids=list(result.evidence_ids),
+                        proposed_change=active.proposed_change,
+                        before_state=active.before_state,
+                        expected_after_state=active.expected_after_state,
+                        risk_and_impact=active.risk_and_impact,
+                        rollback_method=active.rollback_method,
+                        service_restart_required=active.service_restart_required,
+                        affected_component=active.affected_component,
+                        failure_reason=active.failure_reason,
+                        can_propose=view.can_propose_remediation,
+                        can_approve=view.can_approve_remediation,
+                        can_apply=view.can_apply_remediation,
+                        can_rollback=view.can_rollback_remediation,
+                        apply_blocked_reason=view.apply_blocked_reason,
+                        approver=active.approver,
+                        approved_at=active.approved_at,
                     )
                 )
 
@@ -417,15 +520,19 @@ class MockComplianceProvider:
         asset: Asset,
         recommended: str,
         verification: str,
-        overlay_status: str | None = None,
+        overlay=None,
     ) -> RemediationView:
         ver = verification
         if item.verification and item.verification.evidence_keys and not ver:
             keys = ", ".join(item.verification.evidence_keys[:3])
             ver = f"Rescan and confirm: {keys}."
-        status = overlay_status or (
+        finding_status = (
             item.status.value if hasattr(item.status, "value") else str(item.status)
         )
+        action_status = ""
+        if overlay is not None:
+            action_status = overlay.status.value
+        status = action_status or finding_status
         return RemediationView(
             remediation_id=item.remediation_id,
             control_id=item.finding_control_id,
@@ -437,12 +544,31 @@ class MockComplianceProvider:
             recommended_action=recommended or item.recommendation or item.reason,
             verification=ver,
             status=status,
+            finding_status=finding_status,
+            action_status=action_status,
             action_type=(
                 item.action_type.value
                 if hasattr(item.action_type, "value")
                 else str(item.action_type)
             ),
             evidence_ids=list(item.evidence_ids),
+            proposed_change=(overlay.proposed_change if overlay else ""),
+            before_state=(overlay.before_state if overlay else ""),
+            expected_after_state=(overlay.expected_after_state if overlay else ""),
+            risk_and_impact=(overlay.risk_and_impact if overlay else ""),
+            rollback_method=(overlay.rollback_method if overlay else ""),
+            service_restart_required=bool(
+                overlay.service_restart_required if overlay else False
+            ),
+            affected_component=(overlay.affected_component if overlay else ""),
+            failure_reason=(overlay.failure_reason if overlay else ""),
+            can_propose=control.can_propose_remediation,
+            can_approve=control.can_approve_remediation,
+            can_apply=control.can_apply_remediation,
+            can_rollback=control.can_rollback_remediation,
+            apply_blocked_reason=control.apply_blocked_reason,
+            approver=(overlay.approver if overlay else ""),
+            approved_at=(overlay.approved_at if overlay else ""),
         )
 
     def _summarize(
@@ -470,11 +596,22 @@ class MockComplianceProvider:
             and not c.remediation_applied
             and not c.review_history
         )
+        # Schema 1.1: only after action VERIFIED / finding VERIFIED_CLOSED.
+        # Schema 1.0: overlay wrote APPLIED/VERIFYING/VERIFIED then UI PASS.
         passed_after_remediation = sum(
             1
             for c in controls
             if c.status is UIStatus.PASS
             and (c.initial_status or c.status) is UIStatus.FAIL
+            and (
+                c.finding_status == RemediationStatus.VERIFIED_CLOSED.value
+                or c.remediation_status
+                in (
+                    RemediationExecStatus.VERIFIED.value,
+                    RemediationExecStatus.APPLIED.value,
+                    RemediationExecStatus.VERIFYING.value,
+                )
+            )
         )
         passed_after_review = sum(
             1

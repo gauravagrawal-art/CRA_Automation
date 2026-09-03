@@ -1,7 +1,8 @@
-"""Lifecycle overlay models for mock remediation and human evidence review.
+"""Lifecycle overlay models for remediation actions and human evidence review.
 
 These records sit beside Flow 3/4 artifacts. They never mutate assessment.json
-verdicts. The UI projects initial vs current status through AssessmentView.
+verdicts. Finding closure remains OPEN / VERIFIED_CLOSED on Flow 4 items;
+action statuses live here.
 """
 
 from __future__ import annotations
@@ -26,13 +27,50 @@ class LifecycleStatus(str, Enum):
 
 
 class RemediationExecStatus(str, Enum):
+    """Remediation-action lifecycle.
+
+    Schema 1.1 writers use PROPOSED … BLOCKED. Legacy 1.0 values are retained
+    so older lifecycle.json documents still parse.
+    """
+
+    # Legacy 1.0 (readable only)
     NOT_REQUIRED = "NOT_REQUIRED"
     PENDING = "PENDING"
     IN_PROGRESS = "IN_PROGRESS"
     APPLIED = "APPLIED"
     VERIFYING = "VERIFYING"
+
+    # Schema 1.1 action lifecycle
+    PROPOSED = "PROPOSED"
+    AWAITING_APPROVAL = "AWAITING_APPROVAL"
+    APPROVED = "APPROVED"
+    APPLYING = "APPLYING"
+    APPLIED_UNVERIFIED = "APPLIED_UNVERIFIED"
     VERIFIED = "VERIFIED"
     FAILED = "FAILED"
+    ROLLED_BACK = "ROLLED_BACK"
+    BLOCKED = "BLOCKED"
+
+
+#: Statuses written by the 1.1 action workflow.
+ACTION_LIFECYCLE_STATUSES = frozenset(
+    {
+        RemediationExecStatus.PROPOSED,
+        RemediationExecStatus.AWAITING_APPROVAL,
+        RemediationExecStatus.APPROVED,
+        RemediationExecStatus.APPLYING,
+        RemediationExecStatus.APPLIED_UNVERIFIED,
+        RemediationExecStatus.VERIFIED,
+        RemediationExecStatus.FAILED,
+        RemediationExecStatus.ROLLED_BACK,
+        RemediationExecStatus.BLOCKED,
+    }
+)
+
+
+class ApprovalAction(str, Enum):
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"
 
 
 class RemediationOrigin(str, Enum):
@@ -104,20 +142,73 @@ class ReviewAttempt(BaseModel):
     timestamp: str = ""
 
 
+class StatusHistoryEntry(BaseModel):
+    from_status: str = Field(alias="from")
+    to_status: str = Field(alias="to")
+    at: str = ""
+    actor: str = ""
+    reason: str = ""
+
+    model_config = {"populate_by_name": True}
+
+
+class ValidationResultEntry(BaseModel):
+    at: str = ""
+    ok: bool = False
+    message: str = ""
+    run_id: str = ""
+
+
+class RollbackEvent(BaseModel):
+    at: str = ""
+    actor: str = ""
+    reason: str = ""
+    result: str = ""
+
+
 class RemediationRecord(BaseModel):
     remediation_id: str
     control_id: str
     asset_id: str = ""
     issue: str = ""
     recommended_action: str = ""
-    verification_method: str = "Mock verification scan"
-    status: RemediationExecStatus = RemediationExecStatus.PENDING
+    verification_method: str = "Fresh evidence collection and deterministic assessment"
+    status: RemediationExecStatus = RemediationExecStatus.PROPOSED
     execution_result: str = ""
     verification_result: str = ""
     created_at: str = ""
     applied_at: str = ""
     verified_at: str = ""
     origin: RemediationOrigin = RemediationOrigin.SCAN
+
+    # Schema 1.1 additive fields (defaults keep 1.0 documents loadable)
+    finding_remediation_id: str = ""
+    target_id: str = ""
+    registry_hash: str = ""
+    operation_id: str = ""
+    observed_evidence: str = ""
+    evidence_refs: list[str] = Field(default_factory=list)
+    proposed_change: str = ""
+    before_state: str = ""
+    expected_after_state: str = ""
+    change_reason: str = ""
+    affected_component: str = ""
+    service_restart_required: bool = False
+    risk_and_impact: str = ""
+    validation_method: str = ""
+    rollback_method: str = ""
+    approver: str = ""
+    approved_at: str = ""
+    approval_action: ApprovalAction | None = None
+    actor: str = ""
+    status_history: list[StatusHistoryEntry] = Field(default_factory=list)
+    failure_reason: str = ""
+    validation_results: list[ValidationResultEntry] = Field(default_factory=list)
+    rollback_events: list[RollbackEvent] = Field(default_factory=list)
+    apply_attempt_id: str = ""
+    applied_overlay_hash: str = ""
+    verification_run_id: str = ""
+    verification_outcome: str = ""
 
 
 class DatasetRecord(BaseModel):
@@ -173,3 +264,8 @@ def make_evidence_id(run_id: str, control_id: str, attempt: int) -> str:
         f"{run_id}|{control_id}|{attempt}".encode()
     ).hexdigest()
     return f"HEV-{digest[:12]}"
+
+
+def make_apply_attempt_id(remediation_id: str, clock: str) -> str:
+    digest = hashlib.sha256(f"{remediation_id}|{clock}".encode()).hexdigest()
+    return f"APPLY-{digest[:12]}"

@@ -394,8 +394,109 @@ def verify_cmd(
         console.print(f"[red]Verification refused: {exc}[/red]")
         raise typer.Exit(1) from exc
 
+    from src.lifecycle.service import reconcile_actions_from_verification
+
+    reconcile_actions_from_verification(
+        previous_run, new_run, assessments_dir=assessments_dir
+    )
+
     _print_verification(verification)
     console.print(f"[green]Written:[/green] {out_dir / 'verification.json'}")
+
+
+@app.command("propose-remediation")
+def propose_remediation_cmd(
+    run_id: str = typer.Option(..., "--run-id", help="Assessed run with remediation.json"),
+    control_id: str = typer.Option(..., "--control-id"),
+    actor: str = typer.Option("operator", "--actor"),
+    assessments_dir: Path | None = typer.Option(None, "--assessments-dir"),
+) -> None:
+    """Propose an allow-listed remediation action from an eligible OPEN finding."""
+    from src.lifecycle.service import LifecycleError, propose_action
+
+    try:
+        entry = propose_action(
+            run_id, control_id, actor=actor, assessments_dir=assessments_dir
+        )
+    except LifecycleError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    rem = entry.remediations[-1]
+    console.print(
+        f"[green]Proposed[/green] {rem.remediation_id} → {rem.status.value} "
+        f"(finding stays OPEN)"
+    )
+
+
+@app.command("approve-remediation")
+def approve_remediation_cmd(
+    run_id: str = typer.Option(..., "--run-id"),
+    control_id: str = typer.Option(..., "--control-id"),
+    approver: str = typer.Option(..., "--approver"),
+    action: str = typer.Option("APPROVE", "--action", help="APPROVE or REJECT"),
+    assessments_dir: Path | None = typer.Option(None, "--assessments-dir"),
+) -> None:
+    """Explicitly approve or reject a remediation proposal."""
+    from src.lifecycle.service import LifecycleError, approve_action
+
+    try:
+        entry = approve_action(
+            run_id,
+            control_id,
+            approver=approver,
+            action=action,
+            assessments_dir=assessments_dir,
+        )
+    except LifecycleError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    rem = entry.remediations[-1]
+    console.print(f"[green]{rem.status.value}[/green] by {rem.approver}")
+
+
+@app.command("apply-remediation")
+def apply_remediation_cmd(
+    run_id: str = typer.Option(..., "--run-id"),
+    control_id: str = typer.Option(..., "--control-id"),
+    actor: str = typer.Option("operator", "--actor"),
+    assessments_dir: Path | None = typer.Option(None, "--assessments-dir"),
+) -> None:
+    """Apply an approved allow-listed demo action. Does not close the finding."""
+    from src.lifecycle.service import LifecycleError, apply_action
+
+    try:
+        entry = apply_action(
+            run_id, control_id, actor=actor, assessments_dir=assessments_dir
+        )
+    except LifecycleError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    rem = entry.remediations[-1]
+    console.print(
+        f"[green]{rem.status.value}[/green] {rem.execution_result} "
+        "(finding stays OPEN until re-scan verifies PASS)"
+    )
+
+
+@app.command("rollback-remediation")
+def rollback_remediation_cmd(
+    run_id: str = typer.Option(..., "--run-id"),
+    control_id: str = typer.Option(..., "--control-id"),
+    actor: str = typer.Option("operator", "--actor"),
+    assessments_dir: Path | None = typer.Option(None, "--assessments-dir"),
+) -> None:
+    """Roll back a demo overlay operation. Finding stays OPEN."""
+    from src.lifecycle.service import LifecycleError, rollback_action
+
+    try:
+        entry = rollback_action(
+            run_id, control_id, actor=actor, assessments_dir=assessments_dir
+        )
+    except LifecycleError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    rem = entry.remediations[-1]
+    console.print(f"[green]{rem.status.value}[/green]")
 
 
 @app.command("serve")

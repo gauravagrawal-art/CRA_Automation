@@ -1,0 +1,103 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block content %}
+
+<div class="panel">
+  <h2>Audit</h2>
+  <p class="lede">
+    Named approvers and timestamps already stored on the approved registry and on
+    remediation actions. This page does not invent actors or change any verdict.
+  </p>
+</div>
+
+<section class="panel">
+  <h2>Assessment baseline</h2>
+  {% if audit.registry %}
+  <dl class="meta">
+    <dt>Approved by</dt>
+    <dd>{{ audit.registry.actor }}</dd>
+    <dt>Approved at</dt>
+    <dd>{{ audit.registry.at | ts }}</dd>
+    <dt>Subject</dt>
+    <dd>{{ audit.registry.subject }}</dd>
+    <dt>Detail</dt>
+    <dd>{{ audit.registry.detail }}</dd>
+  </dl>
+  {% else %}
+  <p class="empty">No approved registry yet. Approve a baseline on Sources &amp; Registry.</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Assessments</h2>
+  <p class="lede small">Each assessment run evaluates the approved baseline above.</p>
+  {% if audit.assessments %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Run</th>
+          <th>Baseline approver</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in audit.assessments %}
+        <tr>
+          <td class="nowrap">{{ e.at | ts }}</td>
+          <td class="mono"><a href="/runs/{{ e.run_id }}">{{ e.subject }}</a></td>
+          <td>{{ e.actor }}</td>
+          <td>{{ e.detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No assessments have been produced yet.</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Remediation approvals</h2>
+  <p class="lede small">Explicit approve or reject decisions on remediation actions.</p>
+  {% if audit.remediations %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Decision</th>
+          <th>Approver</th>
+          <th>Control</th>
+          <th>Run</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in audit.remediations %}
+        <tr>
+          <td class="nowrap">{{ e.at | ts }}</td>
+          <td>{{ m.badge(e.action) }}</td>
+          <td>{{ e.actor }}</td>
+          <td class="mono">
+            {% if e.run_id %}
+            <a href="/assessment/control/{{ e.control_id }}?run={{ e.run_id }}">{{ e.subject }}</a>
+            {% else %}
+            {{ e.subject }}
+            {% endif %}
+          </td>
+          <td class="mono">{{ e.run_id or '—' }}</td>
+          <td>{{ e.detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No remediation approvals recorded yet.</p>
+  {% endif %}
+</section>
+
+{% endblock %}

@@ -84,9 +84,27 @@ def load_approved_registry(path: Path) -> tuple[dict[str, Any], str]:
     return data, registry_hash
 
 
-def build_provider(profile: TargetProfile) -> Provider:
+def build_provider(
+    profile: TargetProfile,
+    *,
+    demo_state_root: Path | None = None,
+) -> Provider:
     if profile.provider == "mock":
-        return MockProvider(profile.target_id, profile.environment)
+        overlay_operations = None
+        try:
+            from src.lifecycle.demo_state import load_demo_state
+
+            state = load_demo_state(profile.target_id, root=demo_state_root)
+            ops = state.get("operations") or {}
+            if ops:
+                overlay_operations = ops
+        except Exception:
+            overlay_operations = None
+        return MockProvider(
+            profile.target_id,
+            profile.environment,
+            overlay_operations=overlay_operations,
+        )
     if profile.provider == "ssh":
         raise NotImplementedError(
             "SSHProvider is not part of this baseline. Implement it behind the "
@@ -272,6 +290,7 @@ def collect_evidence(
     provider_override: str | None = None,
     scenario_override: str | None = None,
     clock: Callable[[], str] | None = None,
+    demo_state_root: Path | None = None,
 ) -> tuple[Path, EvidenceRun]:
     """Execute the approved evidence plan and write `evidence.json`.
 
@@ -289,13 +308,21 @@ def collect_evidence(
         profile = profile.model_copy(update={"environment": scenario_override})
 
     resolved_run_id = run_id or make_run_id(registry_hash, target_profile_hash, started_at)
-    run_dir = (output_dir or EVIDENCE_DIR) / resolved_run_id
+    evidence_root = output_dir or EVIDENCE_DIR
+    run_dir = evidence_root / resolved_run_id
     raw_dir = run_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     plan = build_plan(registry, profile)
 
-    provider = build_provider(profile)
+    # Persistent demo overlay applies to the live workspace only. Isolated
+    # output directories (tests) stay on the scenario fixture unless a caller
+    # passes demo_state_root explicitly.
+    overlay_root = demo_state_root
+    if overlay_root is None and evidence_root.resolve() != EVIDENCE_DIR.resolve():
+        overlay_root = evidence_root / ".no-demo-overlay"
+
+    provider = build_provider(profile, demo_state_root=overlay_root)
     tools = ToolRegistry(provider, clock=now)
 
     items: list[EvidenceItem] = []

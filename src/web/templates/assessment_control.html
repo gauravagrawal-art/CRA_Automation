@@ -81,9 +81,10 @@
   <div class="field">
     <div class="label">Remediation</div>
     <p>{{ control.remediation }}</p>
-    {% if control.remediation_applied %}
-    <p class="small muted">Applied (mock){% if control.remediation_status %} · {{ control.remediation_status }}{% endif %}</p>
-    {% endif %}
+    <p class="small muted">
+      Finding: {{ control.finding_status or 'OPEN' }}
+      {% if control.remediation_status %} · Action: {{ control.remediation_status }}{% endif %}
+    </p>
   </div>
   {% endif %}
   {% if control.verification %}
@@ -106,15 +107,81 @@
   {% endif %}
 </div>
 
-{% if control.can_apply_remediation %}
+{% if control.can_propose_remediation or control.can_approve_remediation or control.can_apply_remediation or control.can_rollback_remediation or control.apply_blocked_reason %}
 <div class="panel">
-  <p class="lede small">Mock remediation simulates apply → verify → re-evaluate. Nothing is changed on a real target.</p>
-  <form method="post" action="/actions/lifecycle/apply-remediation"
-        data-confirm="Apply mock remediation and verify for {{ control.control_id }}?">
-    <input type="hidden" name="run_id" value="{{ run_id }}">
-    <input type="hidden" name="control_id" value="{{ control.control_id }}">
-    <button class="btn primary" type="submit" data-busy-label="Applying…">Apply Remediation</button>
-  </form>
+  <h2>Remediation action</h2>
+  <p class="lede small">
+    Propose → approve → apply (demo target only). Application does not close the finding;
+    re-scan and verify with fresh evidence.
+  </p>
+  {% if control.remediation_status == 'APPLIED_UNVERIFIED' %}
+  <p class="banner info">Applied but unverified. Finding is still <strong>OPEN</strong>. Assessment verdict is unchanged. Re-scan the same target to verify.</p>
+  {% endif %}
+  {% if control.apply_blocked_reason %}
+  <p class="small muted">{{ control.apply_blocked_reason }}</p>
+  {% endif %}
+
+  {% if control.can_approve_remediation or control.risk_and_impact or control.proposed_change %}
+  {{ m.impact_preview(
+       control.service_restart_required,
+       control.risk_and_impact,
+       control.affected_component,
+       control.proposed_change,
+       control.rollback_method,
+       awaiting=control.can_approve_remediation
+     ) }}
+  {% endif %}
+
+  <div class="actions-row">
+    {% if control.can_propose_remediation %}
+    <form method="post" action="/actions/lifecycle/propose-remediation" class="inline"
+          data-confirm="Propose remediation for {{ control.control_id }}?">
+      <input type="hidden" name="run_id" value="{{ run_id }}">
+      <input type="hidden" name="control_id" value="{{ control.control_id }}">
+      <button class="btn primary" type="submit" data-busy-label="Proposing…">Propose</button>
+    </form>
+    {% endif %}
+    {% if control.can_approve_remediation %}
+    <form method="post" action="/actions/lifecycle/approve-remediation" class="inline"
+          data-confirm="Approve remediation for {{ control.control_id }}?">
+      <input type="hidden" name="run_id" value="{{ run_id }}">
+      <input type="hidden" name="control_id" value="{{ control.control_id }}">
+      <input type="hidden" name="approval_action" value="APPROVE">
+      <label class="small" for="approver-{{ control.control_id }}">Approver</label>
+      <input id="approver-{{ control.control_id }}" class="input" name="approver" required placeholder="Your name">
+      <button class="btn primary" type="submit" data-busy-label="Approving…">Approve</button>
+    </form>
+    <form method="post" action="/actions/lifecycle/approve-remediation" class="inline"
+          data-confirm="Reject remediation for {{ control.control_id }}?">
+      <input type="hidden" name="run_id" value="{{ run_id }}">
+      <input type="hidden" name="control_id" value="{{ control.control_id }}">
+      <input type="hidden" name="approval_action" value="REJECT">
+      <input class="input" name="approver" required placeholder="Your name">
+      <button class="btn" type="submit">Reject</button>
+    </form>
+    {% endif %}
+    {% if control.can_apply_remediation %}
+    <form method="post" action="/actions/lifecycle/apply-remediation" class="inline"
+          data-confirm="Apply allow-listed demo remediation for {{ control.control_id }}? Finding stays OPEN.">
+      <input type="hidden" name="run_id" value="{{ run_id }}">
+      <input type="hidden" name="control_id" value="{{ control.control_id }}">
+      <button class="btn primary" type="submit" data-busy-label="Applying…">Apply</button>
+    </form>
+    {% endif %}
+    {% if control.can_rollback_remediation %}
+    <form method="post" action="/actions/lifecycle/rollback-remediation" class="inline"
+          data-confirm="Roll back demo remediation for {{ control.control_id }}?">
+      <input type="hidden" name="run_id" value="{{ run_id }}">
+      <input type="hidden" name="control_id" value="{{ control.control_id }}">
+      <button class="btn" type="submit" data-busy-label="Rolling back…">Rollback</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if control.rem_approver %}
+  <p class="small muted">
+    Decision by {{ control.rem_approver }}{% if control.rem_approved_at %} at {{ control.rem_approved_at | ts }}{% endif %}.
+  </p>
+  {% endif %}
 </div>
 {% endif %}
 

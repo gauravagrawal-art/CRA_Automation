@@ -110,11 +110,23 @@ class ControlView(BaseModel):
     evidence_ids: list[str] = Field(default_factory=list)
     remediation_applied: bool = False
     remediation_status: str = ""
+    finding_status: str = "OPEN"
     can_apply_remediation: bool = False
+    can_propose_remediation: bool = False
+    can_approve_remediation: bool = False
+    can_rollback_remediation: bool = False
+    apply_blocked_reason: str = ""
     can_submit_evidence: bool = False
     analysis_decision: str = ""
     analysis_reason: str = ""
     review_history: list[ReviewHistoryEntry] = Field(default_factory=list)
+    proposed_change: str = ""
+    affected_component: str = ""
+    service_restart_required: bool = False
+    risk_and_impact: str = ""
+    rollback_method: str = ""
+    rem_approver: str = ""
+    rem_approved_at: str = ""
     # Audit fields kept for expandable detail; not primary UI content.
     audit: dict[str, Any] = Field(default_factory=dict)
 
@@ -141,8 +153,25 @@ class RemediationView(BaseModel):
     recommended_action: str = ""
     verification: str = ""
     status: str = "OPEN"
+    finding_status: str = "OPEN"
+    action_status: str = ""
     action_type: str = ""
     evidence_ids: list[str] = Field(default_factory=list)
+    proposed_change: str = ""
+    before_state: str = ""
+    expected_after_state: str = ""
+    risk_and_impact: str = ""
+    rollback_method: str = ""
+    service_restart_required: bool = False
+    affected_component: str = ""
+    failure_reason: str = ""
+    can_propose: bool = False
+    can_approve: bool = False
+    can_apply: bool = False
+    can_rollback: bool = False
+    apply_blocked_reason: str = ""
+    approver: str = ""
+    approved_at: str = ""
 
 
 class AssessmentSummaryView(BaseModel):

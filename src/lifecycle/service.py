@@ -1,7 +1,9 @@
-"""Orchestrate mock remediation apply/verify and human evidence analysis.
+"""Orchestrate remediation-action lifecycle and human evidence analysis.
 
 Domain rules enforced here:
-- Suggested remediation != PASS
+- Suggested remediation != PASS / finding closure
+- Apply never mutates assessment.json or closes Flow 4 findings
+- Closure requires Flow 4 verify + reconcile after a fresh evidence run
 - Uploaded evidence != PASS until analysis accepts it
 - Original findings are retained on ControlLifecycle
 """
@@ -19,12 +21,21 @@ from src.compliance.applicability import mock_assets, primary_asset
 from src.compliance.content import evidence_facts, index_evidence, short_finding, short_requirement
 from src.compliance.models import UIStatus
 from src.compliance.status import map_verdict
-from src.config import ASSESSMENTS_DIR, HUMAN_EVIDENCE_MAX_BYTES
+from src.config import (
+    ASSESSMENTS_DIR,
+    DEMO_PROVIDER,
+    DEMO_TARGET_ID,
+    HUMAN_EVIDENCE_MAX_BYTES,
+    LIFECYCLE_SCHEMA_VERSION,
+)
 from src.evidence.models import EvidenceRun
 from src.lifecycle.analyzer import get_evidence_analyzer
+from src.lifecycle.demo_operations import get_operation_for_control
+from src.lifecycle.demo_state import assessments_demo_root
 from src.lifecycle.executor import get_remediation_executor
 from src.lifecycle.models import (
     AnalysisDecision,
+    ApprovalAction,
     ControlLifecycle,
     DatasetRecord,
     EvidenceAttachment,
@@ -36,11 +47,23 @@ from src.lifecycle.models import (
     RemediationOrigin,
     RemediationRecord,
     ReviewAttempt,
+    RollbackEvent,
+    StatusHistoryEntry,
+    ValidationResultEntry,
+    make_apply_attempt_id,
     make_evidence_id,
     make_remediation_id,
 )
 from src.lifecycle.store import human_evidence_dir, load_lifecycle, save_lifecycle
-from src.remediation.models import RemediationDocument
+from src.lifecycle.transitions import assert_transition
+from src.remediation.models import (
+    ActionType,
+    RemediationDocument,
+    RemediationStatus,
+    VerificationDocument,
+    VerificationOutcome,
+    summarize,
+)
 from src.services import runs_service
 
 Clock = Callable[[], str]
@@ -76,6 +99,19 @@ def _load_remediation_doc(
     return runs_service.load_remediation(run_id)
 
 
+def _save_remediation_doc(
+    document: RemediationDocument,
+    assessments_dir: Path | None,
+) -> None:
+    root = assessments_dir or ASSESSMENTS_DIR
+    path = root / document.metadata.run_id / "remediation.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(document.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _load_evidence_run(run_id: str, assessments_dir: Path | None) -> EvidenceRun | None:
     if assessments_dir is not None:
         candidate = assessments_dir.parent / "evidence" / run_id / "evidence.json"
@@ -85,6 +121,24 @@ def _load_evidence_run(run_id: str, assessments_dir: Path | None) -> EvidenceRun
             )
         return None
     return runs_service.load_evidence(run_id)
+
+
+def _load_verification(
+    run_id: str, assessments_dir: Path | None
+) -> VerificationDocument | None:
+    if assessments_dir is not None:
+        path = assessments_dir / run_id / "verification.json"
+        if path.exists():
+            return VerificationDocument.model_validate(
+                json.loads(path.read_text(encoding="utf-8"))
+            )
+        rem = _load_remediation_doc(run_id, assessments_dir)
+        return rem.verification if rem else None
+    verification = runs_service.load_verification(run_id)
+    if verification is not None:
+        return verification
+    rem = runs_service.load_remediation(run_id)
+    return rem.verification if rem else None
 
 
 def _to_lifecycle_status(ui: UIStatus) -> LifecycleStatus:
@@ -116,6 +170,7 @@ def _ensure_document(
     return LifecycleDocument(
         run_id=run_id,
         assessment_id=assessment.metadata.assessment_id,
+        schema_version=LIFECYCLE_SCHEMA_VERSION,
         generated_at=clock,
         updated_at=clock,
         controls={},
@@ -199,39 +254,58 @@ def _active_remediation(entry: ControlLifecycle) -> RemediationRecord | None:
         if rem.status not in (
             RemediationExecStatus.VERIFIED,
             RemediationExecStatus.NOT_REQUIRED,
+            RemediationExecStatus.ROLLED_BACK,
         ):
             return rem
     return entry.remediations[-1] if entry.remediations else None
 
 
-def _seed_recommendation(
-    assessment: Assessment,
-    control_id: str,
-    remediation_doc: RemediationDocument | None,
-) -> tuple[str, str]:
-    """Return (recommended_action, issue) from Flow 4 advisory item or registry seed."""
-    result = _control_result(assessment, control_id)
-    if remediation_doc:
-        for item in remediation_doc.items:
-            if item.finding_control_id == control_id:
-                action = (item.recommendation or item.reason or "").strip()
-                issue = (item.observed_state or item.reason or "").strip()
-                if action:
-                    return action, issue
-    seed = result.remediation_seed or {}
-    action = str(seed.get("recommendation") or "").strip()
-    issue = result.observed_state or result.reason or ""
-    return action, issue
+def _flow4_item(
+    remediation_doc: RemediationDocument | None, control_id: str
+):
+    if remediation_doc is None:
+        return None
+    for item in remediation_doc.items:
+        if item.finding_control_id == control_id:
+            return item
+    return None
 
 
-def apply_remediation(
+def _record_transition(
+    rem: RemediationRecord,
+    target: RemediationExecStatus,
+    *,
+    clock: str,
+    actor: str,
+    reason: str = "",
+) -> None:
+    assert_transition(rem.status, target)
+    if rem.status is target:
+        return
+    rem.status_history.append(
+        StatusHistoryEntry(
+            **{
+                "from": rem.status.value,
+                "to": target.value,
+                "at": clock,
+                "actor": actor,
+                "reason": reason,
+            }
+        )
+    )
+    rem.status = target
+    rem.actor = actor or rem.actor
+
+
+def propose_action(
     run_id: str,
     control_id: str,
     *,
+    actor: str = "operator",
     assessments_dir: Path | None = None,
     clock: Clock | None = None,
 ) -> ControlLifecycle:
-    """Apply mock remediation then verify. PASS only after successful verification."""
+    """Create a remediation proposal from an eligible failed finding and submit it."""
     now = (clock or _utc_now)()
     root = assessments_dir or ASSESSMENTS_DIR
     assessment = _load_assessment(run_id, assessments_dir)
@@ -239,8 +313,27 @@ def apply_remediation(
         raise LifecycleError(f"No assessment for run {run_id}.")
 
     remediation_doc = _load_remediation_doc(run_id, assessments_dir)
-    result = _control_result(assessment, control_id)
+    item = _flow4_item(remediation_doc, control_id)
+    if item is None:
+        raise LifecycleError(
+            f"No Flow 4 remediation item for {control_id}. Compose remediation first."
+        )
+    if item.action_type is not ActionType.TECHNICAL_REMEDIATION:
+        raise LifecycleError(
+            f"Only TECHNICAL_REMEDIATION findings are eligible (got {item.action_type.value})."
+        )
+    if item.status is not RemediationStatus.OPEN:
+        raise LifecycleError(
+            f"Finding {control_id} is {item.status.value}; only OPEN findings may be proposed."
+        )
 
+    result = _control_result(assessment, control_id)
+    if result.verdict not in (Verdict.FAIL, Verdict.PARTIAL):
+        raise LifecycleError(
+            f"Propose is only available for FAIL/PARTIAL controls (got {result.verdict.value})."
+        )
+
+    operation = get_operation_for_control(control_id)
     doc = _ensure_document(
         run_id, assessment=assessment, assessments_dir=assessments_dir, clock=now
     )
@@ -251,130 +344,498 @@ def apply_remediation(
         clock=now,
         assessments_dir=assessments_dir,
     )
-
     if entry.current_status is LifecycleStatus.PASS:
         raise LifecycleError(f"Control {control_id} already passed.")
 
-    if entry.current_status not in (
-        LifecycleStatus.FAIL,
-        LifecycleStatus.REMEDIATION_PENDING,
-    ):
-        raise LifecycleError(
-            f"Control {control_id} cannot be remediated in status "
-            f"{entry.current_status.value}."
-        )
-
     rem = _active_remediation(entry)
-    action, issue = _seed_recommendation(assessment, control_id, remediation_doc)
-    if rem and rem.recommended_action:
-        action = rem.recommended_action
-        issue = rem.issue or issue or entry.initial_finding
-
-    if not action:
-        raise LifecycleError(f"No recommended remediation action for {control_id}.")
-
-    # Scan FAIL/PARTIAL, or FAIL after human-review analysis.
-    scan_fail = result.verdict in (Verdict.FAIL, Verdict.PARTIAL)
-    human_fail = (
-        entry.initial_status is LifecycleStatus.REVIEW and bool(entry.review_attempts)
-    )
-    if not scan_fail and not human_fail:
-        raise LifecycleError(
-            "Apply Remediation is only available for failed remediable controls."
-        )
-
-    origin = (
-        RemediationOrigin.HUMAN_REVIEW
-        if human_fail
-        else RemediationOrigin.SCAN
-    )
-    if rem is None or rem.status in (
-        RemediationExecStatus.VERIFIED,
-        RemediationExecStatus.NOT_REQUIRED,
+    if rem is not None and rem.status in (
+        RemediationExecStatus.AWAITING_APPROVAL,
+        RemediationExecStatus.APPROVED,
+        RemediationExecStatus.APPLYING,
+        RemediationExecStatus.APPLIED_UNVERIFIED,
     ):
-        rem = RemediationRecord(
-            remediation_id=make_remediation_id(run_id, control_id, origin),
-            control_id=control_id,
-            asset_id=entry.asset_id,
-            issue=issue or entry.initial_finding,
-            recommended_action=action,
-            verification_method="Mock verification scan",
-            status=RemediationExecStatus.PENDING,
-            created_at=now,
-            origin=origin,
+        raise LifecycleError(
+            f"An active remediation action already exists in status {rem.status.value}."
         )
-        entry.remediations.append(rem)
-    else:
-        rem.recommended_action = action
-        rem.issue = issue or rem.issue or entry.initial_finding
 
-    executor = get_remediation_executor()
+    action = (item.recommendation or "").strip()
+    if not action:
+        raise LifecycleError(f"No approved remediation recommendation for {control_id}.")
 
-    # Trail: IN_PROGRESS → APPLIED → VERIFYING → VERIFIED. Never PASS in apply().
-    rem.status = RemediationExecStatus.IN_PROGRESS
-    entry.previous_status = entry.current_status
-    entry.current_status = LifecycleStatus.REMEDIATION_PENDING
-    entry.updated_at = now
-
-    apply_result = executor.apply(rem, clock=now)
-    if not apply_result.get("ok"):
-        rem.status = RemediationExecStatus.FAILED
-        rem.execution_result = str(apply_result.get("execution_result") or "Apply failed.")
-        entry.current_status = LifecycleStatus.FAIL
-        doc.updated_at = now
-        save_lifecycle(doc, root)
-        raise LifecycleError(rem.execution_result)
-
-    rem.status = RemediationExecStatus.APPLIED
-    rem.execution_result = str(apply_result.get("execution_result") or "")
-    rem.applied_at = str(apply_result.get("applied_at") or now)
-
-    rem.status = RemediationExecStatus.VERIFYING
-    verify_result = executor.verify(
-        rem,
+    rem = RemediationRecord(
+        remediation_id=make_remediation_id(run_id, control_id, RemediationOrigin.SCAN),
         control_id=control_id,
-        finding=rem.issue or entry.initial_finding,
-        recommended_action=rem.recommended_action,
+        asset_id=entry.asset_id,
+        issue=item.observed_state or entry.initial_finding,
+        recommended_action=action,
+        verification_method=(
+            operation.validation_method
+            if operation
+            else "Fresh evidence collection and deterministic assessment"
+        ),
+        status=RemediationExecStatus.PROPOSED,
+        created_at=now,
+        origin=RemediationOrigin.SCAN,
+        finding_remediation_id=item.remediation_id,
+        target_id=assessment.metadata.target_id,
+        registry_hash=assessment.metadata.registry_hash,
+        operation_id=operation.operation_id if operation else "",
+        observed_evidence=item.observed_state or result.observed_state or "",
+        evidence_refs=list(item.evidence_ids or result.evidence_ids),
+        proposed_change=operation.proposed_change if operation else action,
+        before_state=operation.before_state if operation else (item.observed_state or ""),
+        expected_after_state=(
+            operation.expected_after_state
+            if operation
+            else "Control returns PASS under the same approved baseline."
+        ),
+        change_reason=operation.change_reason if operation else item.reason,
+        affected_component=(
+            operation.affected_component if operation else "target configuration"
+        ),
+        service_restart_required=bool(
+            operation.service_restart_required if operation else False
+        ),
+        risk_and_impact=(
+            operation.risk_and_impact
+            if operation
+            else "Configuration change may affect management-plane access."
+        ),
+        validation_method=(
+            operation.validation_method
+            if operation
+            else "Re-scan and verify with Flow 2 + Flow 3 + Flow 4 verify."
+        ),
+        rollback_method=(
+            operation.rollback_method
+            if operation
+            else "Revert the change outside this application and re-scan."
+        ),
+        actor=actor,
+    )
+    rem.status_history.append(
+        StatusHistoryEntry(
+            **{
+                "from": RemediationExecStatus.PROPOSED.value,
+                "to": RemediationExecStatus.PROPOSED.value,
+                "at": now,
+                "actor": actor,
+                "reason": "Proposal created",
+            }
+        )
+    )
+    _record_transition(
+        rem,
+        RemediationExecStatus.AWAITING_APPROVAL,
         clock=now,
+        actor=actor,
+        reason="Submitted for approval",
     )
-    if not verify_result.get("ok"):
-        rem.status = RemediationExecStatus.FAILED
-        rem.verification_result = str(
-            verify_result.get("verification_result") or "Verification failed."
-        )
-        entry.current_status = LifecycleStatus.FAIL
-        doc.updated_at = now
-        save_lifecycle(doc, root)
-        raise LifecycleError(rem.verification_result)
-
-    rem.status = RemediationExecStatus.VERIFIED
-    rem.verification_result = str(verify_result.get("verification_result") or "")
-    rem.verified_at = str(verify_result.get("verified_at") or now)
-
-    entry.previous_status = LifecycleStatus.FAIL
-    entry.current_status = LifecycleStatus.PASS
+    entry.remediations.append(rem)
     entry.updated_at = now
-
-    _, _, asset_type = _asset_for_control(control_id, result, _registry_dict())
-    entry.dataset_records.append(
-        DatasetRecord(
-            control_id=control_id,
-            control_requirement=short_requirement(result),
-            asset_type=asset_type,
-            evidence="; ".join(entry.initial_evidence),
-            human_decision="",
-            ai_decision="",
-            final_decision=LifecycleStatus.PASS.value,
-            decision_reason="Passed after mock remediation and verification.",
-            remediation=rem.recommended_action,
-            verification_result=rem.verification_result,
-            recorded_at=now,
-        )
-    )
-
+    doc.schema_version = LIFECYCLE_SCHEMA_VERSION
     doc.updated_at = now
     save_lifecycle(doc, root)
     return entry
+
+
+def approve_action(
+    run_id: str,
+    control_id: str,
+    *,
+    approver: str,
+    action: ApprovalAction | str = ApprovalAction.APPROVE,
+    assessments_dir: Path | None = None,
+    clock: Clock | None = None,
+) -> ControlLifecycle:
+    """Approve or reject a proposed remediation action."""
+    now = (clock or _utc_now)()
+    root = assessments_dir or ASSESSMENTS_DIR
+    approver_name = (approver or "").strip()
+    if not approver_name:
+        raise LifecycleError("Approver name is required.")
+
+    if isinstance(action, str):
+        try:
+            action = ApprovalAction(action.upper())
+        except ValueError as exc:
+            raise LifecycleError("Approval action must be APPROVE or REJECT.") from exc
+
+    assessment = _load_assessment(run_id, assessments_dir)
+    if assessment is None:
+        raise LifecycleError(f"No assessment for run {run_id}.")
+
+    doc = load_lifecycle(run_id, assessments_dir)
+    if doc is None or control_id not in doc.controls:
+        raise LifecycleError(f"No remediation proposal for {control_id}.")
+    entry = doc.controls[control_id]
+    rem = _active_remediation(entry)
+    if rem is None:
+        raise LifecycleError(f"No remediation action for {control_id}.")
+    if rem.status is not RemediationExecStatus.AWAITING_APPROVAL:
+        raise LifecycleError(
+            f"Action is {rem.status.value}; expected AWAITING_APPROVAL."
+        )
+
+    rem.approver = approver_name
+    rem.approved_at = now
+    rem.approval_action = action
+    if action is ApprovalAction.APPROVE:
+        _record_transition(
+            rem,
+            RemediationExecStatus.APPROVED,
+            clock=now,
+            actor=approver_name,
+            reason="Explicit approval",
+        )
+    else:
+        _record_transition(
+            rem,
+            RemediationExecStatus.PROPOSED,
+            clock=now,
+            actor=approver_name,
+            reason="Rejected; returned to proposal",
+        )
+    entry.updated_at = now
+    doc.updated_at = now
+    save_lifecycle(doc, root)
+    return entry
+
+
+def apply_action(
+    run_id: str,
+    control_id: str,
+    *,
+    actor: str = "operator",
+    assessments_dir: Path | None = None,
+    clock: Clock | None = None,
+) -> ControlLifecycle:
+    """Apply an approved action on the demo target. Does not close the finding."""
+    now = (clock or _utc_now)()
+    root = assessments_dir or ASSESSMENTS_DIR
+    assessment = _load_assessment(run_id, assessments_dir)
+    if assessment is None:
+        raise LifecycleError(f"No assessment for run {run_id}.")
+
+    doc = load_lifecycle(run_id, assessments_dir)
+    if doc is None or control_id not in doc.controls:
+        raise LifecycleError(f"No remediation action for {control_id}. Propose first.")
+    entry = doc.controls[control_id]
+    rem = _active_remediation(entry)
+    if rem is None:
+        raise LifecycleError(f"No remediation action for {control_id}.")
+
+    # Idempotent: already applying / applied / verified — return as-is.
+    if rem.status in (
+        RemediationExecStatus.APPLYING,
+        RemediationExecStatus.APPLIED_UNVERIFIED,
+        RemediationExecStatus.VERIFIED,
+    ):
+        return entry
+
+    if rem.status is RemediationExecStatus.BLOCKED:
+        # Allow retry only via approve path; apply from BLOCKED is refused.
+        raise LifecycleError(
+            rem.failure_reason
+            or "Action is BLOCKED. Clear the block (re-approve on an executable target)."
+        )
+
+    if rem.status is not RemediationExecStatus.APPROVED:
+        raise LifecycleError(
+            f"Apply requires APPROVED status (got {rem.status.value})."
+        )
+
+    target_id = assessment.metadata.target_id
+    provider = assessment.metadata.provider
+    demo_root = assessments_demo_root(assessments_dir)
+
+    if target_id != DEMO_TARGET_ID or provider != DEMO_PROVIDER:
+        rem.failure_reason = (
+            f"Execution is allow-listed only for {DEMO_TARGET_ID} ({DEMO_PROVIDER})."
+        )
+        _record_transition(
+            rem,
+            RemediationExecStatus.BLOCKED,
+            clock=now,
+            actor=actor,
+            reason=rem.failure_reason,
+        )
+        entry.updated_at = now
+        doc.updated_at = now
+        save_lifecycle(doc, root)
+        raise LifecycleError(rem.failure_reason)
+
+    if not rem.operation_id or get_operation_for_control(control_id) is None:
+        rem.failure_reason = f"No allow-listed demo operation for {control_id}."
+        _record_transition(
+            rem,
+            RemediationExecStatus.BLOCKED,
+            clock=now,
+            actor=actor,
+            reason=rem.failure_reason,
+        )
+        entry.updated_at = now
+        doc.updated_at = now
+        save_lifecycle(doc, root)
+        raise LifecycleError(rem.failure_reason)
+
+    rem.apply_attempt_id = make_apply_attempt_id(rem.remediation_id, now)
+    _record_transition(
+        rem,
+        RemediationExecStatus.APPLYING,
+        clock=now,
+        actor=actor,
+        reason="Apply started",
+    )
+    entry.previous_status = entry.current_status
+    entry.current_status = LifecycleStatus.REMEDIATION_PENDING
+    entry.updated_at = now
+    doc.updated_at = now
+    save_lifecycle(doc, root)  # persist APPLYING before executor
+
+    executor = get_remediation_executor()
+    apply_result = executor.apply(
+        rem,
+        clock=now,
+        target_id=target_id,
+        provider=provider,
+        demo_state_root=demo_root,
+    )
+
+    if not apply_result.get("ok"):
+        rem.failure_reason = str(apply_result.get("execution_result") or "Apply failed.")
+        rem.execution_result = rem.failure_reason
+        _record_transition(
+            rem,
+            RemediationExecStatus.FAILED,
+            clock=now,
+            actor=actor,
+            reason=rem.failure_reason,
+        )
+        entry.current_status = LifecycleStatus.FAIL
+        doc.updated_at = now
+        save_lifecycle(doc, root)
+        raise LifecycleError(rem.failure_reason)
+
+    rem.execution_result = str(apply_result.get("execution_result") or "")
+    rem.applied_at = str(apply_result.get("applied_at") or now)
+    rem.applied_overlay_hash = str(apply_result.get("applied_overlay_hash") or "")
+    _record_transition(
+        rem,
+        RemediationExecStatus.APPLIED_UNVERIFIED,
+        clock=now,
+        actor=actor,
+        reason="Applied on demo target; awaiting re-scan",
+    )
+    entry.current_status = LifecycleStatus.REMEDIATION_PENDING
+    entry.updated_at = now
+    doc.updated_at = now
+    save_lifecycle(doc, root)
+    return entry
+
+
+def apply_remediation(
+    run_id: str,
+    control_id: str,
+    *,
+    assessments_dir: Path | None = None,
+    clock: Clock | None = None,
+    actor: str = "operator",
+) -> ControlLifecycle:
+    """Backward-compatible entry: apply an already-approved action only."""
+    return apply_action(
+        run_id,
+        control_id,
+        actor=actor,
+        assessments_dir=assessments_dir,
+        clock=clock,
+    )
+
+
+def rollback_action(
+    run_id: str,
+    control_id: str,
+    *,
+    actor: str = "operator",
+    assessments_dir: Path | None = None,
+    clock: Clock | None = None,
+) -> ControlLifecycle:
+    """Roll back a demo overlay operation; finding stays OPEN."""
+    now = (clock or _utc_now)()
+    root = assessments_dir or ASSESSMENTS_DIR
+    assessment = _load_assessment(run_id, assessments_dir)
+    if assessment is None:
+        raise LifecycleError(f"No assessment for run {run_id}.")
+
+    doc = load_lifecycle(run_id, assessments_dir)
+    if doc is None or control_id not in doc.controls:
+        raise LifecycleError(f"No remediation action for {control_id}.")
+    entry = doc.controls[control_id]
+    rem = _active_remediation(entry)
+    if rem is None:
+        raise LifecycleError(f"No remediation action for {control_id}.")
+    if rem.status not in (
+        RemediationExecStatus.APPLIED_UNVERIFIED,
+        RemediationExecStatus.FAILED,
+    ):
+        raise LifecycleError(
+            f"Rollback requires APPLIED_UNVERIFIED or FAILED (got {rem.status.value})."
+        )
+
+    executor = get_remediation_executor()
+    result = executor.rollback(
+        rem,
+        clock=now,
+        target_id=assessment.metadata.target_id,
+        provider=assessment.metadata.provider,
+        demo_state_root=assessments_demo_root(assessments_dir),
+    )
+    message = str(result.get("execution_result") or "Rolled back.")
+    rem.rollback_events.append(
+        RollbackEvent(at=now, actor=actor, reason="Operator rollback", result=message)
+    )
+    if not result.get("ok"):
+        rem.failure_reason = message
+        raise LifecycleError(message)
+
+    _record_transition(
+        rem,
+        RemediationExecStatus.ROLLED_BACK,
+        clock=now,
+        actor=actor,
+        reason=message,
+    )
+    entry.previous_status = entry.current_status
+    entry.current_status = LifecycleStatus.FAIL
+    entry.updated_at = now
+    doc.updated_at = now
+    save_lifecycle(doc, root)
+    return entry
+
+
+def reconcile_actions_from_verification(
+    previous_run_id: str,
+    new_run_id: str,
+    *,
+    assessments_dir: Path | None = None,
+    clock: Clock | None = None,
+    actor: str = "verifier",
+) -> None:
+    """Update origin actions and Flow 4 finding status from a verification document.
+
+    Does not re-run verify(); reads the existing verification artifact.
+    """
+    now = (clock or _utc_now)()
+    root = assessments_dir or ASSESSMENTS_DIR
+    verification = _load_verification(new_run_id, assessments_dir)
+    if verification is None:
+        return
+
+    origin_doc = load_lifecycle(previous_run_id, assessments_dir)
+    remediation = _load_remediation_doc(previous_run_id, assessments_dir)
+
+    for vitem in verification.items:
+        control_id = vitem.control_id
+        rem_record = None
+        entry = None
+        if origin_doc is not None and control_id in origin_doc.controls:
+            entry = origin_doc.controls[control_id]
+            for candidate in reversed(entry.remediations):
+                if candidate.status in (
+                    RemediationExecStatus.APPLIED_UNVERIFIED,
+                    RemediationExecStatus.FAILED,
+                    RemediationExecStatus.BLOCKED,
+                    RemediationExecStatus.APPLYING,
+                ):
+                    rem_record = candidate
+                    break
+
+        if rem_record is not None and entry is not None:
+            rem_record.verification_run_id = new_run_id
+            rem_record.verification_outcome = vitem.outcome.value
+            rem_record.validation_results.append(
+                ValidationResultEntry(
+                    at=now,
+                    ok=vitem.outcome is VerificationOutcome.VERIFIED_CLOSED,
+                    message=vitem.reason,
+                    run_id=new_run_id,
+                )
+            )
+            if vitem.outcome is VerificationOutcome.VERIFIED_CLOSED:
+                if rem_record.status is not RemediationExecStatus.VERIFIED:
+                    try:
+                        if rem_record.status is RemediationExecStatus.APPLYING:
+                            _record_transition(
+                                rem_record,
+                                RemediationExecStatus.APPLIED_UNVERIFIED,
+                                clock=now,
+                                actor=actor,
+                                reason="Normalized before verify reconcile",
+                            )
+                        _record_transition(
+                            rem_record,
+                            RemediationExecStatus.VERIFIED,
+                            clock=now,
+                            actor=actor,
+                            reason=vitem.reason,
+                        )
+                    except ValueError:
+                        rem_record.status = RemediationExecStatus.VERIFIED
+                rem_record.verified_at = now
+                rem_record.verification_result = vitem.reason
+                entry.previous_status = entry.current_status
+                entry.current_status = LifecycleStatus.PASS
+            elif vitem.outcome is VerificationOutcome.VERIFICATION_BLOCKED:
+                rem_record.failure_reason = vitem.reason
+                try:
+                    _record_transition(
+                        rem_record,
+                        RemediationExecStatus.BLOCKED,
+                        clock=now,
+                        actor=actor,
+                        reason=vitem.reason,
+                    )
+                except ValueError:
+                    rem_record.status = RemediationExecStatus.BLOCKED
+                entry.current_status = LifecycleStatus.FAIL
+            else:
+                rem_record.failure_reason = vitem.reason
+                try:
+                    if rem_record.status is RemediationExecStatus.APPLIED_UNVERIFIED:
+                        _record_transition(
+                            rem_record,
+                            RemediationExecStatus.FAILED,
+                            clock=now,
+                            actor=actor,
+                            reason=vitem.reason,
+                        )
+                    elif rem_record.status is RemediationExecStatus.APPLYING:
+                        _record_transition(
+                            rem_record,
+                            RemediationExecStatus.FAILED,
+                            clock=now,
+                            actor=actor,
+                            reason=vitem.reason,
+                        )
+                except ValueError:
+                    rem_record.status = RemediationExecStatus.FAILED
+                entry.current_status = LifecycleStatus.FAIL
+            entry.updated_at = now
+
+        if remediation is not None and vitem.outcome is VerificationOutcome.VERIFIED_CLOSED:
+            for item in remediation.items:
+                if item.finding_control_id == control_id:
+                    item.status = RemediationStatus.VERIFIED_CLOSED
+
+    if origin_doc is not None:
+        origin_doc.updated_at = now
+        save_lifecycle(origin_doc, root)
+
+    if remediation is not None:
+        remediation.summary = summarize(
+            remediation.items, remediation.summary.controls_assessed
+        )
+        _save_remediation_doc(remediation, assessments_dir)
 
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
@@ -425,7 +886,6 @@ def analyse_evidence(
     if entry.current_status is LifecycleStatus.PASS:
         raise LifecycleError(f"Control {control_id} already passed.")
 
-    # Allow re-submit after FAIL / still REVIEW / REMEDIATION_PENDING after weak evidence.
     if entry.current_status not in (
         LifecycleStatus.REVIEW,
         LifecycleStatus.FAIL,
@@ -591,11 +1051,15 @@ def refresh_reports(run_id: str, *, assessments_dir: Path | None = None) -> None
         final_report_path(run_id, root).write_text(final, encoding="utf-8")
 
 
-# Re-export for callers that need UIStatus mapping helpers.
 __all__ = [
     "LifecycleError",
     "analyse_evidence",
+    "apply_action",
     "apply_remediation",
+    "approve_action",
+    "propose_action",
+    "reconcile_actions_from_verification",
     "refresh_reports",
+    "rollback_action",
     "_ui_from_lifecycle",
 ]

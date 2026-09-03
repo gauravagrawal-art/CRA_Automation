@@ -29,7 +29,15 @@ from src.config import (
     PROJECT_ROOT,
 )
 from src.evidence.models import CollectionStatus
-from src.lifecycle.service import LifecycleError, analyse_evidence, apply_remediation, refresh_reports
+from src.lifecycle.service import (
+    LifecycleError,
+    analyse_evidence,
+    apply_action,
+    approve_action,
+    propose_action,
+    refresh_reports,
+    rollback_action,
+)
 from src.registry.models import ApplicabilityStatus, EvidenceMode
 from src.remediation.models import ActionType, RemediationStatus
 from src.services import context, runs_service, workflow
@@ -576,6 +584,22 @@ def remediation_page(request: Request) -> Response:
     )
 
 
+# --- Audit ------------------------------------------------------------------
+
+
+@app.get("/audit", response_class=HTMLResponse)
+def audit_page(request: Request) -> Response:
+    from src.services.audit import collect_audit_log
+
+    return _page(
+        request,
+        "audit.html",
+        nav="audit",
+        title="Audit",
+        audit=collect_audit_log(),
+    )
+
+
 # --- Reports ----------------------------------------------------------------
 
 
@@ -827,23 +851,134 @@ def action_rescan_verify(
     return _action(request, run, "/remediation")
 
 
+@app.post("/actions/lifecycle/propose-remediation")
+async def action_propose_remediation(
+    request: Request,
+    run_id: str = Form(...),
+    control_id: str = Form(...),
+    actor: str = Form("operator"),
+) -> Response:
+    """Create a remediation proposal and submit it for approval."""
+
+    def run() -> RedirectResponse:
+        propose_action(run_id.strip(), control_id.strip(), actor=(actor or "operator").strip())
+        return _redirect(
+            f"/assessment/control/{control_id.strip()}?run={run_id.strip()}",
+            "Remediation proposal submitted for approval. Finding remains OPEN.",
+            "success",
+        )
+
+    try:
+        _guard_origin(request)
+        return run()
+    except LifecycleError as exc:
+        return _redirect(
+            f"/assessment/control/{control_id.strip()}?run={run_id.strip()}",
+            str(exc),
+            "error",
+        )
+    except (WorkflowError, RegistryServiceError) as exc:
+        return _redirect("/remediation", str(exc), "error")
+
+
+@app.post("/actions/lifecycle/approve-remediation")
+async def action_approve_remediation(
+    request: Request,
+    run_id: str = Form(...),
+    control_id: str = Form(...),
+    approver: str = Form(...),
+    approval_action: str = Form("APPROVE"),
+) -> Response:
+    """Explicitly approve or reject a remediation proposal."""
+
+    def run() -> RedirectResponse:
+        approve_action(
+            run_id.strip(),
+            control_id.strip(),
+            approver=approver,
+            action=approval_action,
+        )
+        label = "approved" if approval_action.upper() == "APPROVE" else "rejected"
+        return _redirect(
+            f"/assessment/control/{control_id.strip()}?run={run_id.strip()}",
+            f"Remediation proposal {label}. Finding remains OPEN.",
+            "success",
+        )
+
+    try:
+        _guard_origin(request)
+        return run()
+    except LifecycleError as exc:
+        return _redirect(
+            f"/assessment/control/{control_id.strip()}?run={run_id.strip()}",
+            str(exc),
+            "error",
+        )
+    except (WorkflowError, RegistryServiceError) as exc:
+        return _redirect("/remediation", str(exc), "error")
+
+
 @app.post("/actions/lifecycle/apply-remediation")
 async def action_apply_remediation(
     request: Request,
     run_id: str = Form(...),
     control_id: str = Form(...),
+    actor: str = Form("operator"),
 ) -> Response:
-    """Mock apply → verify → PASS. Does not mutate assessment.json."""
+    """Apply an approved allow-listed demo action. Does not close the finding."""
 
     def run() -> RedirectResponse:
-        apply_remediation(run_id.strip(), control_id.strip())
+        apply_action(
+            run_id.strip(),
+            control_id.strip(),
+            actor=(actor or "operator").strip(),
+        )
         try:
             refresh_reports(run_id.strip())
         except Exception:
             pass
         return _redirect(
             f"/assessment/control/{control_id.strip()}?run={run_id.strip()}",
-            "Mock remediation applied and verified.",
+            "Remediation applied on the demo target (APPLIED_UNVERIFIED). "
+            "Finding remains OPEN — re-scan and verify to close it.",
+            "success",
+        )
+
+    try:
+        _guard_origin(request)
+        return run()
+    except LifecycleError as exc:
+        return _redirect(
+            f"/assessment/control/{control_id.strip()}?run={run_id.strip()}",
+            str(exc),
+            "error",
+        )
+    except (WorkflowError, RegistryServiceError) as exc:
+        return _redirect("/remediation", str(exc), "error")
+
+
+@app.post("/actions/lifecycle/rollback-remediation")
+async def action_rollback_remediation(
+    request: Request,
+    run_id: str = Form(...),
+    control_id: str = Form(...),
+    actor: str = Form("operator"),
+) -> Response:
+    """Roll back a demo overlay operation. Finding stays OPEN."""
+
+    def run() -> RedirectResponse:
+        rollback_action(
+            run_id.strip(),
+            control_id.strip(),
+            actor=(actor or "operator").strip(),
+        )
+        try:
+            refresh_reports(run_id.strip())
+        except Exception:
+            pass
+        return _redirect(
+            f"/assessment/control/{control_id.strip()}?run={run_id.strip()}",
+            "Remediation rolled back. Finding remains OPEN.",
             "success",
         )
 

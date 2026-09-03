@@ -161,6 +161,12 @@ REMEDIATION_OWNER = "SYSTEM_OWNER"
 
 # --- Lifecycle overlay (mock remediation execution + human evidence review) ---
 
-LIFECYCLE_SCHEMA_VERSION = "1.0"
+LIFECYCLE_SCHEMA_VERSION = "1.1"
+SUPPORTED_LIFECYCLE_SCHEMA_VERSIONS = {"1.0", "1.1"}
 # Soft cap for human-uploaded evidence attachments (bytes per file).
 HUMAN_EVIDENCE_MAX_BYTES = 1_048_576
+
+# Demo-target allow-listed execution (Flow 4 remediation actions).
+DEMO_TARGET_ID = "nextboss-demo"
+DEMO_PROVIDER = "mock"
+DEMO_STATE_DIR = ASSESSMENTS_DIR / ".demo-state"

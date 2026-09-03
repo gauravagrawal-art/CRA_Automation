@@ -287,6 +287,9 @@ def start_scan(request: ScanRequest) -> Job:
         )
         handle.set_redirect(f"/remediation?run={run_id}")
         if request.previous_run:
+            from src.lifecycle.service import reconcile_actions_from_verification
+
+            reconcile_actions_from_verification(request.previous_run, run_id)
             verification = runs_service.load_verification(run_id)
             if verification is None:
                 remediation = runs_service.load_remediation(run_id)
@@ -369,6 +372,10 @@ def start_remediation(run_id: str, previous_run: str | None = None) -> Job:
             registry_path=registry_path,
             previous_run_id=previous_run,
         )
+        if previous_run:
+            from src.lifecycle.service import reconcile_actions_from_verification
+
+            reconcile_actions_from_verification(previous_run, run_id)
         overview = runs_service.run_overview(run_id)
         handle.step(
             f"{overview.open_findings} open, {overview.verified_closed} verified closed"
@@ -394,6 +401,9 @@ def start_verification(previous_run: str, new_run: str) -> Job:
     def work(handle: JobHandle) -> None:
         handle.step(f"Comparing {previous_run} with {new_run}")
         _, verification = verify_runs(previous_run_id=previous_run, new_run_id=new_run)
+        from src.lifecycle.service import reconcile_actions_from_verification
+
+        reconcile_actions_from_verification(previous_run, new_run)
         if not verification.baseline_comparable:
             code = verification.blocked_reason_code
             handle.step(

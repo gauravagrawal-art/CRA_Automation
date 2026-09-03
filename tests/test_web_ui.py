@@ -65,6 +65,7 @@ def test_docs_and_openapi_are_disabled() -> None:
         "/assessment",
         "/remediation",
         "/reports",
+        "/audit",
         "/settings",
     ],
 )
@@ -202,8 +203,21 @@ def test_why_glossary_covers_core_terms() -> None:
         "HUMAN_REVIEW_REQUIRED",
         "MOCK",
         "VERIFIED_CLOSED",
+        "APPLIED_UNVERIFIED",
+        "AWAITING_APPROVAL",
+        "PROPOSED",
+        "BLOCKED",
+        "ROLLED_BACK",
     ):
         assert explain(term), term
+
+
+def test_audit_page_renders() -> None:
+    response = client.get("/audit")
+    assert response.status_code == 200
+    body = response.text
+    assert "Assessment baseline" in body
+    assert "Remediation approvals" in body
 
 
 def test_workspace_next_action_is_deterministic() -> None:

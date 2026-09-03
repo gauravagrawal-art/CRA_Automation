@@ -87,15 +87,31 @@ GLOSSARY: dict[str, str] = {
         "Human review is required. This is not a FAIL; submit evidence for analysis."
     ),
     "REMEDIATION_PENDING": (
-        "A mock remediation is in progress or awaiting verification. The control has "
-        "not passed yet."
+        "A remediation action is in progress or applied but not yet verified by a "
+        "fresh evidence-backed assessment. The finding remains OPEN."
     ),
-    "PENDING": "Remediation is recommended but not yet applied.",
-    "IN_PROGRESS": "Mock remediation execution has started.",
-    "APPLIED": "Mock remediation was applied; verification has not finished.",
-    "VERIFYING": "Mock verification / re-evaluation is running.",
-    "VERIFIED": "Mock verification succeeded; the control may show PASS.",
-    "FAILED": "Mock remediation or verification did not succeed.",
+    "PROPOSED": "A remediation action has been drafted from an eligible failed finding.",
+    "AWAITING_APPROVAL": "The proposal is waiting for an explicit named approver.",
+    "APPROVED": "An approver accepted the proposal; apply is allowed on the demo target.",
+    "APPLYING": "Allow-listed demo execution has started.",
+    "APPLIED_UNVERIFIED": (
+        "The allow-listed change was applied on the demo target. The finding is still "
+        "OPEN until a fresh re-scan returns PASS."
+    ),
+    "PENDING": "Remediation is recommended but not yet applied (legacy overlay).",
+    "IN_PROGRESS": "Legacy overlay: execution had started.",
+    "APPLIED": "Legacy overlay: applied before the action lifecycle split.",
+    "VERIFYING": "Legacy overlay: in-process verification (no longer used for apply).",
+    "VERIFIED": (
+        "The remediation action was verified by a later evidence-backed PASS for the "
+        "same control, target and approved registry baseline."
+    ),
+    "FAILED": "Remediation application or verification did not succeed; finding stays OPEN.",
+    "ROLLED_BACK": "The demo overlay operation was rolled back; finding stays OPEN.",
+    "BLOCKED": (
+        "Execution or verification is blocked (for example non-demo target or "
+        "registry baseline change)."
+    ),
     # Modes and context
     "DETERMINISTIC": (
         "The verdict comes from the rule engine evaluating the approved rules. No "

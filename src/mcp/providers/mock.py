@@ -32,18 +32,35 @@ def _load_fixture(scenario: str) -> dict[str, Any]:
 
 
 class MockProvider(Provider):
-    """Serves fixture data for one synthetic target scenario."""
+    """Serves fixture data for one synthetic target scenario.
+
+    Optional demo overlay patches (allow-listed remediation actions) are merged
+    in memory after the immutable scenario fixture is loaded. Fixture files on
+    disk are never rewritten.
+    """
 
     name = "mock"
 
-    def __init__(self, target_id: str, scenario: str = "compliant") -> None:
+    def __init__(
+        self,
+        target_id: str,
+        scenario: str = "compliant",
+        *,
+        overlay_operations: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(target_id)
         if scenario not in SCENARIOS:
             raise ValueError(
                 f"Unknown mock scenario '{scenario}'. Expected one of: {', '.join(SCENARIOS)}"
             )
         self.scenario = scenario
-        self._fixture = _load_fixture(scenario)
+        base = _load_fixture(scenario)
+        if overlay_operations:
+            from src.lifecycle.demo_state import apply_operations_to_fixture
+
+            self._fixture = apply_operations_to_fixture(base, overlay_operations)
+        else:
+            self._fixture = base
 
     def _section(self, key: str) -> Any:
         return json.loads(json.dumps(self._fixture.get(key)))

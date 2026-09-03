@@ -1,4 +1,4 @@
-"""Lifecycle overlay — mock remediation execution and human evidence review."""
+"""Lifecycle overlay — remediation actions and human evidence review."""
 
 from __future__ import annotations
 
@@ -23,8 +23,16 @@ from src.lifecycle.models import (
     EvidenceSubmission,
     LifecycleStatus,
     RemediationExecStatus,
+    RemediationOrigin,
+    RemediationRecord,
 )
-from src.lifecycle.service import LifecycleError, analyse_evidence, apply_remediation
+from src.lifecycle.service import (
+    LifecycleError,
+    analyse_evidence,
+    apply_action,
+    approve_action,
+    propose_action,
+)
 from src.lifecycle.store import load_lifecycle
 from src.registry.versioning import latest_approved_path
 from src.remediation.models import RemediationDocument
@@ -53,6 +61,7 @@ def lifecycle_run(tmp_path_factory):
         run_id=run_id,
         scenario_override="vulnerable",
         clock=lambda: FIXED_TIME,
+        demo_state_root=assessments_dir / ".demo-state",
     )
     assess(
         run_id=run_id,
@@ -92,16 +101,40 @@ def _load_artifacts(ctx):
     return assessment, evidence, remediation
 
 
-def test_mock_executor_apply_does_not_claim_pass() -> None:
-    from src.lifecycle.models import RemediationOrigin, RemediationRecord
+def _propose_approve(ctx, control_id: str, clock: str = FIXED_TIME) -> None:
+    propose_action(
+        ctx["run_id"],
+        control_id,
+        assessments_dir=ctx["assessments_dir"],
+        clock=lambda: clock,
+    )
+    approve_action(
+        ctx["run_id"],
+        control_id,
+        approver="Tester",
+        assessments_dir=ctx["assessments_dir"],
+        clock=lambda: clock,
+    )
 
+
+def test_mock_executor_apply_does_not_claim_pass(tmp_path) -> None:
+    from src.lifecycle.demo_operations import get_operation_for_control
+
+    op = get_operation_for_control(FAIL_CONTROL)
     rem = RemediationRecord(
         remediation_id="LREM-test",
         control_id=FAIL_CONTROL,
         recommended_action="Disable TLS 1.0.",
+        operation_id=op.operation_id,
         origin=RemediationOrigin.SCAN,
     )
-    result = MockRemediationExecutor().apply(rem, clock=FIXED_TIME)
+    result = MockRemediationExecutor().apply(
+        rem,
+        clock=FIXED_TIME,
+        target_id="nextboss-demo",
+        provider="mock",
+        demo_state_root=tmp_path / ".demo-state",
+    )
     assert result["ok"] is True
     assert "PASS" not in result["execution_result"]
 
@@ -155,26 +188,24 @@ def test_mock_analyzer_phrases() -> None:
     assert ok.final_decision is AnalysisDecision.PASS
 
 
-def test_apply_remediation_passes_only_after_verify(lifecycle_run) -> None:
+def test_apply_remediation_stays_unverified(lifecycle_run) -> None:
     ctx = lifecycle_run
     run_id = ctx["run_id"]
     assessments_dir = ctx["assessments_dir"]
 
-    entry = apply_remediation(
+    _propose_approve(ctx, FAIL_CONTROL)
+    entry = apply_action(
         run_id,
         FAIL_CONTROL,
         assessments_dir=assessments_dir,
         clock=lambda: FIXED_TIME,
     )
-    assert entry.current_status is LifecycleStatus.PASS
-    assert entry.previous_status is LifecycleStatus.FAIL
+    assert entry.current_status is LifecycleStatus.REMEDIATION_PENDING
     assert entry.initial_status is LifecycleStatus.FAIL
     assert entry.initial_finding
     rem = entry.remediations[-1]
-    assert rem.status is RemediationExecStatus.VERIFIED
+    assert rem.status is RemediationExecStatus.APPLIED_UNVERIFIED
     assert rem.applied_at
-    assert rem.verified_at
-    assert rem.verification_result
     # assessment.json verdict unchanged
     assessment = Assessment.model_validate(
         json.loads((assessments_dir / run_id / "assessment.json").read_text())
@@ -183,9 +214,8 @@ def test_apply_remediation_passes_only_after_verify(lifecycle_run) -> None:
     assert engine.verdict is Verdict.FAIL
 
 
-def test_original_finding_retained_after_pass(lifecycle_run) -> None:
+def test_original_finding_retained_after_apply(lifecycle_run) -> None:
     ctx = lifecycle_run
-    # Fresh control that may already be remediable from previous test — use another FAIL.
     run_id = ctx["run_id"]
     assessments_dir = ctx["assessments_dir"]
     assessment = Assessment.model_validate(
@@ -196,10 +226,11 @@ def test_original_finding_retained_after_pass(lifecycle_run) -> None:
         for r in assessment.results
         if r.verdict is Verdict.FAIL and r.control_id != FAIL_CONTROL
     )
-    entry = apply_remediation(
+    _propose_approve(ctx, other, clock="2026-09-03T12:10:00+00:00")
+    entry = apply_action(
         run_id, other, assessments_dir=assessments_dir, clock=lambda: FIXED_TIME
     )
-    assert entry.current_status is LifecycleStatus.PASS
+    assert entry.current_status is LifecycleStatus.REMEDIATION_PENDING
     assert entry.initial_finding
     assert entry.initial_evidence
 
@@ -252,16 +283,11 @@ def test_provider_reflects_overlay_counts(lifecycle_run) -> None:
         lifecycle=lifecycle,
     )
     ctrl = next(c for c in view.controls if c.control_id == FAIL_CONTROL)
-    assert ctrl.status is UIStatus.PASS
-    assert ctrl.previous_status is UIStatus.FAIL
+    assert ctrl.status is UIStatus.REMEDIATION_PENDING
     assert ctrl.initial_status is UIStatus.FAIL
     assert ctrl.finding  # original finding retained via overlay
-    # Does not invent Flow 2 evidence IDs
-    for eid in ctrl.evidence_ids:
-        assert eid.startswith("EV-") or eid.startswith("NOCALL") or True
-
-    assert view.summary.passed_after_remediation >= 1
-    assert view.summary.remediation_pending == 0
+    assert ctrl.remediation_status == RemediationExecStatus.APPLIED_UNVERIFIED.value
+    assert view.summary.remediation_pending >= 1
 
 
 def test_overall_status_includes_remediation_pending() -> None:
@@ -275,20 +301,49 @@ def test_overall_status_includes_remediation_pending() -> None:
     )
 
 
-def test_cannot_apply_to_pass_control(lifecycle_run) -> None:
-    ctx = lifecycle_run
-    with pytest.raises(LifecycleError):
-        apply_remediation(
-            ctx["run_id"],
+def test_cannot_apply_without_approval(lifecycle_run, tmp_path) -> None:
+    if APPROVED_PATH is None:
+        pytest.skip("approved registry required")
+    evidence_dir = tmp_path / "evidence"
+    assessments_dir = tmp_path / "assessments"
+    run_id = "RUN-NOAPPROVE-001"
+    collect_evidence(
+        registry_path=APPROVED_PATH,
+        target_path=TARGET_PATH,
+        output_dir=evidence_dir,
+        run_id=run_id,
+        scenario_override="vulnerable",
+        clock=lambda: FIXED_TIME,
+        demo_state_root=assessments_dir / ".demo-state",
+    )
+    assess(
+        run_id=run_id,
+        registry_path=APPROVED_PATH,
+        evidence_dir=evidence_dir,
+        output_dir=assessments_dir,
+        clock=lambda: FIXED_TIME,
+    )
+    remediate(
+        run_id=run_id,
+        registry_path=APPROVED_PATH,
+        evidence_dir=evidence_dir,
+        assessments_dir=assessments_dir,
+        clock=lambda: FIXED_TIME,
+    )
+    propose_action(
+        run_id, FAIL_CONTROL, assessments_dir=assessments_dir, clock=lambda: FIXED_TIME
+    )
+    with pytest.raises(LifecycleError, match="APPROVED"):
+        apply_action(
+            run_id,
             FAIL_CONTROL,
-            assessments_dir=ctx["assessments_dir"],
+            assessments_dir=assessments_dir,
             clock=lambda: FIXED_TIME,
         )
 
 
 def test_insufficient_evidence_phrase(lifecycle_run) -> None:
     ctx = lifecycle_run
-    # Use another documentary control
     assessment = Assessment.model_validate(
         json.loads(
             (ctx["assessments_dir"] / ctx["run_id"] / "assessment.json").read_text()

@@ -15,8 +15,8 @@
   </div>
   <p class="lede">
     Each item identifies the control, affected asset, issue, and recommended action.
-    Mock <strong>Apply Remediation</strong> on a control page simulates execution and verification;
-    the advisory Flow 4 list still does not change the target.
+    Remediation actions require propose → approve → apply (demo target only).
+    Application does <strong>not</strong> close the finding; re-scan and verify with fresh evidence.
   </p>
 
   {% if not remediation %}
@@ -44,7 +44,8 @@
     </h2>
     <div class="right">
       <span class="chip">{{ item.severity.value if item.severity.value != 'NONE' else item.action_type }}</span>
-      {{ m.badge(item.status) }}
+      <span class="chip" title="Finding status">{{ item.finding_status or 'OPEN' }}</span>
+      {% if item.action_status %}{{ m.badge(item.action_status) }}{% else %}{{ m.badge(item.status) }}{% endif %}
     </div>
   </div>
   <dl class="meta">
@@ -62,17 +63,80 @@
     <div class="label">Verification</div>
     <p>{{ item.verification or 'Rescan and confirm PASS for this control.' }}</p>
   </div>
-  {% if item.status in ('OPEN', 'PENDING', 'FAILED') or item.status == 'OPEN' %}
-  {% set ctrl = view.controls | selectattr('control_id', 'equalto', item.control_id) | first %}
-  {% if ctrl and ctrl.can_apply_remediation %}
-  <form method="post" action="/actions/lifecycle/apply-remediation" class="inline"
-        data-confirm="Apply mock remediation for {{ item.control_id }}?">
-    <input type="hidden" name="run_id" value="{{ run_id }}">
-    <input type="hidden" name="control_id" value="{{ item.control_id }}">
-    <button class="btn small primary" type="submit" data-busy-label="Applying…">Apply Remediation</button>
-  </form>
+  {% if item.action_status == 'APPLIED_UNVERIFIED' %}
+  <p class="banner info">Applied but unverified. Finding stays OPEN until a fresh evidence-backed PASS.</p>
   {% endif %}
+  {% if item.failure_reason %}
+  <p class="small muted">{{ item.failure_reason }}</p>
   {% endif %}
+  {% if item.apply_blocked_reason %}
+  <p class="small muted">{{ item.apply_blocked_reason }}</p>
+  {% endif %}
+
+  {% if item.can_approve or item.risk_and_impact or item.proposed_change %}
+  {{ m.impact_preview(
+       item.service_restart_required,
+       item.risk_and_impact,
+       item.affected_component,
+       item.proposed_change,
+       item.rollback_method,
+       awaiting=item.can_approve
+     ) }}
+  {% endif %}
+
+  <div class="actions-row">
+    {% if item.can_propose %}
+    <form method="post" action="/actions/lifecycle/propose-remediation" class="inline"
+          data-confirm="Propose remediation for {{ item.control_id }}?">
+      <input type="hidden" name="run_id" value="{{ run_id }}">
+      <input type="hidden" name="control_id" value="{{ item.control_id }}">
+      <button class="btn small primary" type="submit" data-busy-label="Proposing…">Propose</button>
+    </form>
+    {% endif %}
+    {% if item.can_approve %}
+    <form method="post" action="/actions/lifecycle/approve-remediation" class="inline"
+          data-confirm="Approve remediation for {{ item.control_id }}?">
+      <input type="hidden" name="run_id" value="{{ run_id }}">
+      <input type="hidden" name="control_id" value="{{ item.control_id }}">
+      <input type="hidden" name="approval_action" value="APPROVE">
+      <input class="input" name="approver" required placeholder="Approver name">
+      <button class="btn small primary" type="submit" data-busy-label="Approving…">Approve</button>
+    </form>
+    {% endif %}
+    {% if item.can_apply %}
+    <form method="post" action="/actions/lifecycle/apply-remediation" class="inline"
+          data-confirm="Apply allow-listed demo remediation for {{ item.control_id }}? Finding stays OPEN.">
+      <input type="hidden" name="run_id" value="{{ run_id }}">
+      <input type="hidden" name="control_id" value="{{ item.control_id }}">
+      <button class="btn small primary" type="submit" data-busy-label="Applying…">Apply</button>
+    </form>
+    {% endif %}
+    {% if item.can_rollback %}
+    <form method="post" action="/actions/lifecycle/rollback-remediation" class="inline"
+          data-confirm="Roll back demo remediation for {{ item.control_id }}?">
+      <input type="hidden" name="run_id" value="{{ run_id }}">
+      <input type="hidden" name="control_id" value="{{ item.control_id }}">
+      <button class="btn small" type="submit" data-busy-label="Rolling back…">Rollback</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if item.approver %}
+  <p class="small muted">
+    Decision by {{ item.approver }}{% if item.approved_at %} at {{ item.approved_at | ts }}{% endif %}.
+  </p>
+  {% endif %}
+
+  {% if item.before_state or item.expected_after_state %}
+  <details>
+    <summary>Before / after</summary>
+    <div class="body">
+      {% if item.before_state %}<p><strong>Before:</strong> {{ item.before_state }}</p>{% endif %}
+      {% if item.expected_after_state %}<p><strong>Expected after:</strong> {{ item.expected_after_state }}</p>{% endif %}
+    </div>
+  </details>
+  {% endif %}
+
   {% if item.evidence_ids %}
   <p class="small">
     Evidence:
@@ -89,7 +153,7 @@
 
 <section class="panel">
   <h2>Re-scan &amp; verify</h2>
-  <p class="lede">After applying a fix outside this app, re-scan and compare. Only a new PASS closes a finding.</p>
+  <p class="lede">After applying a fix (or a demo allow-listed action), re-scan and compare. Only a new PASS closes a finding.</p>
   <form method="post" action="/actions/rescan-verify" class="filters"
         data-confirm="Start a new read-only scan and verify against the selected previous run?">
     <div class="field-inline">

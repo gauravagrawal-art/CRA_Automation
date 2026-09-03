@@ -33,7 +33,12 @@ def save_lifecycle(
     path = lifecycle_path(document.run_id, assessments_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(document.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n",
+        json.dumps(
+            document.model_dump(mode="json", by_alias=True),
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n",
         encoding="utf-8",
     )
     return path
