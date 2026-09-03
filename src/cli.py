@@ -27,7 +27,7 @@ from src.services.registry_service import (
 if TYPE_CHECKING:
     from src.remediation.models import VerificationDocument
 
-app = typer.Typer(name="nextboss-cra", help="NextBoss-XT CRA CLI")
+app = typer.Typer(name="nextboss-cra", help="NetBoss-XT CRA CLI")
 console = Console()
 
 
@@ -161,6 +161,10 @@ def collect_evidence_cmd(
     scenario: str | None = typer.Option(
         None, help="Override the mock scenario: compliant | partial | vulnerable"
     ),
+    application: str | None = typer.Option(
+        None,
+        help="Application in the target environment: router_monitor | switch_monitor | sbc_monitor",
+    ),
     run_id: str | None = typer.Option(None, help="Fixed run ID, for reproducible runs"),
     output_dir: Path = typer.Option(EVIDENCE_DIR, help="Directory to write runs into"),
 ) -> None:
@@ -168,12 +172,17 @@ def collect_evidence_cmd(
 
     This flow makes no compliance decision and emits no verdict.
     """
+    from src.display import known_application, resolve_application_id
     from src.evidence.runner import RegistryIntegrityError, collect_evidence
 
     try:
         registry_path = resolve_registry_path(registry)
     except RegistryServiceError as exc:
         raise _fail(exc) from exc
+
+    if application and not known_application(application):
+        console.print(f"[red]Unknown application '{application}'.[/red]")
+        raise typer.Exit(1)
 
     try:
         run_dir, run = collect_evidence(
@@ -183,15 +192,22 @@ def collect_evidence_cmd(
             run_id=run_id,
             provider_override=provider,
             scenario_override=scenario,
+            application_id=resolve_application_id(application),
         )
     except (RegistryIntegrityError, FileNotFoundError, ValueError, NotImplementedError) as exc:
         console.print(f"[red]Evidence collection refused: {exc}[/red]")
         raise typer.Exit(1) from exc
 
+    from src.display import application_label, target_env_label
+
     summary = run.summary
+    app_name = application_label(run.run.application_id)
+    scope = target_env_label(run.run.target_id)
+    if app_name:
+        scope = f"{scope} · {app_name}"
     console.print(
         f"[bold]Evidence run[/bold] {run.run.run_id} "
-        f"(target {run.run.target_id}, provider {run.run.provider})"
+        f"(target env {scope}, provider {run.run.provider})"
     )
     console.print(f"  Registry: {run.run.registry_version} @ {run.run.registry_hash[:16]}...")
 
@@ -527,7 +543,7 @@ def serve_cmd(
             "It has no authentication.[/yellow]"
         )
 
-    console.print(f"[bold]NextBoss-XT CRA UI[/bold] → http://{host}:{port}")
+    console.print(f"[bold]NetBoss-XT CRA UI[/bold] → http://{host}:{port}")
     uvicorn.run("src.web.app:app", host=host, port=port, reload=reload, log_level="info")
 
 

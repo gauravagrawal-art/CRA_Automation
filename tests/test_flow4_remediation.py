@@ -673,6 +673,11 @@ def test_mock_provider_shows_synthetic_disclaimer(report_html, vulnerable_assess
     assert MOCK_BANNER in report_html
 
 
+def test_final_report_shows_target_env_label(report_html):
+    assert "Target Env" in report_html
+    assert "NetBoss-XT" in report_html
+
+
 def test_report_is_self_contained(report_html):
     """No scripts and nothing the browser would have to fetch.
 

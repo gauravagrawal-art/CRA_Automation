@@ -72,7 +72,7 @@ def test_docs_and_openapi_are_disabled() -> None:
 def test_primary_pages_ok(path: str) -> None:
     response = client.get(path, follow_redirects=True)
     assert response.status_code == 200, path
-    assert "NextBoss-XT CRA" in response.text
+    assert "NetBoss-XT CRA" in response.text
 
 
 @requires_demo
@@ -91,6 +91,28 @@ def test_assessment_control_detail() -> None:
     assert "Requirement" in response.text
     assert "Evidence" in response.text
     assert "Status" in response.text
+
+
+@requires_demo
+def test_assessment_home_shows_target_env_scope() -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    body = response.text
+    assert "Target Env" in body
+    assert "NetBoss-XT" in body
+    assert "Assessment done on Target Env:" in body or "CRA Readiness Assessment" in body
+
+
+@requires_demo
+def test_remediation_page_offers_applications() -> None:
+    response = client.get("/remediation")
+    assert response.status_code == 200
+    body = response.text
+    assert "Target Env" in body
+    assert "Router Monitor" in body
+    assert "Switch Monitor" in body
+    assert "SBC Monitor" in body
+    assert "Mock environment" not in body
 
 
 @requires_demo
@@ -161,14 +183,31 @@ def test_approve_without_validation_is_refused() -> None:
     assert "/registry" in location
 
 
-def test_unknown_target_is_refused() -> None:
+def test_evidence_page_offers_applications_not_mock_environments() -> None:
+    response = client.get("/evidence")
+    assert response.status_code == 200
+    body = response.text
+    assert "Target Env" in body
+    assert "Application" in body
+    assert "Router Monitor" in body
+    assert "Switch Monitor" in body
+    assert "SBC Monitor" in body
+    assert "Mock environment" not in body
+    assert "NetBoss-XT" in body
+
+
+def test_unknown_application_is_refused() -> None:
     response = client.post(
         "/actions/evidence/collect",
-        data={"target": "not-a-real-target.json", "chain": "evidence"},
+        data={
+            "target": "nextboss-demo.mock.json",
+            "application": "not-an-app",
+            "chain": "evidence",
+        },
         follow_redirects=False,
     )
     assert response.status_code == 303
-    assert "Unknown target" in unquote_plus(response.headers["location"])
+    assert "Unknown application" in unquote_plus(response.headers["location"])
 
 
 @requires_demo

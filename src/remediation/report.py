@@ -23,6 +23,7 @@ from src.assessment.report import (
     render_limitations,
     render_summary,
 )
+from src.display import application_label, scope_caption, target_env_label
 from src.remediation.models import (
     ActionType,
     RemediationDocument,
@@ -32,7 +33,7 @@ from src.remediation.models import (
     VerificationOutcome,
 )
 
-REPORT_TITLE = "NextBoss-XT CRA Technical Readiness Final Report"
+REPORT_TITLE = "NetBoss-XT CRA Technical Readiness Final Report"
 
 ADVISORY_NOTICE = (
     "Remediation items in this report are advisory. They are composed from the "
@@ -47,7 +48,7 @@ MOCK_BANNER = "SYNTHETIC / MOCK ASSESSMENT DATA"
 MOCK_BANNER_DETAIL = (
     "This report was produced from the mock evidence provider. The findings, "
     "observations and recommendations below describe synthetic fixture data. No "
-    "real NextBoss-XT environment was assessed."
+    "real NetBoss-XT environment was assessed."
 )
 
 ACTION_LABELS = {
@@ -97,7 +98,8 @@ def _mock_banner(assessment: Assessment) -> str:
 def _header(assessment: Assessment, remediation: RemediationDocument) -> str:
     meta = remediation.metadata
     rows = [
-        ("Target", meta.target_id),
+        ("Target Env", target_env_label(meta.target_id)),
+        ("Application", application_label(meta.application_id) or "—"),
         ("Scan / run ID", meta.run_id),
         ("Assessment ID", meta.assessment_id),
         ("Remediation ID", meta.remediation_run_id),
@@ -355,10 +357,16 @@ def render_final_html(
         remediation=remediation,
         lifecycle=lifecycle,
     )
+    scope = scope_caption(
+        assessment.metadata.target_id,
+        assessment.metadata.application_id,
+        "Remediation for",
+    )
     body = "".join(
         [
             _mock_banner(assessment),
             f"<h1>{_e(REPORT_TITLE)}</h1>",
+            f"<p class='lede'>{_e(scope)}.</p>",
             f"<div class='disclaimer'><strong>Scope</strong>{_e(DISCLAIMER)}</div>",
             f"<div class='advisory'><strong>Remediation</strong>{_e(ADVISORY_NOTICE)}</div>",
             concise_body(view, include_remediation=True),

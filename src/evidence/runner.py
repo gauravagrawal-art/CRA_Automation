@@ -289,6 +289,7 @@ def collect_evidence(
     run_id: str | None = None,
     provider_override: str | None = None,
     scenario_override: str | None = None,
+    application_id: str | None = None,
     clock: Callable[[], str] | None = None,
     demo_state_root: Path | None = None,
 ) -> tuple[Path, EvidenceRun]:
@@ -356,6 +357,7 @@ def collect_evidence(
             provider=profile.provider,
             started_at=started_at,
             completed_at=now(),
+            application_id=application_id or "",
         ),
         evidence=items,
         collection_errors=errors,

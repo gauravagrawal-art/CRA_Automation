@@ -138,6 +138,7 @@ class AssessmentMetadata(BaseModel):
     provider: str
     generated_at: str
     llm_narration: str
+    application_id: str = ""
     schema_version: str = ASSESSMENT_SCHEMA_VERSION
 
 

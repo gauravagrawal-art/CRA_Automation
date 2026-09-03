@@ -111,6 +111,7 @@ class RunMetadata(BaseModel):
     provider: str
     started_at: str
     completed_at: str | None = None
+    application_id: str = ""
     schema_version: str = EVIDENCE_SCHEMA_VERSION
 
 

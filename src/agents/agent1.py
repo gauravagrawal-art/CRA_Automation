@@ -418,7 +418,7 @@ def _derive_control(
 
     control_id = f"NMS-CRA-{idx:04d}"
     nms_interpretation = (
-        f"For NextBoss-XT (Class I Category 6 NMS), CRA Annex I Part {req.cra_part} "
+        f"For {PRODUCT_NAME} (Class I Category 6 NMS), CRA Annex I Part {req.cra_part} "
         f"point ({req.cra_point}) requires observable security properties on the "
         f"management plane and/or documented manufacturer processes."
     )

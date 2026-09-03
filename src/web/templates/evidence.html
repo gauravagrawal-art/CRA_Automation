@@ -15,7 +15,7 @@
   <form method="post" action="/actions/evidence/collect" class="filters"
         data-confirm="Start evidence collection?&#10;&#10;Mode: Read-only&#10;Target modification: Disabled">
     <div class="field-inline">
-      <label for="target">Target</label>
+      <label for="target">Target Env</label>
       <select id="target" name="target" required {% if not ctx.registry.scannable %}disabled{% endif %}>
         {% for t in ctx.targets %}
         <option value="{{ t.key }}" {% if not t.supported %}disabled{% endif %}>
@@ -25,11 +25,7 @@
       </select>
     </div>
     <div class="field-inline">
-      <label for="scenario">Mock environment</label>
-      <select id="scenario" name="scenario" {% if not ctx.registry.scannable %}disabled{% endif %}>
-        <option value="">Use target default</option>
-        {% for s in scenarios %}<option value="{{ s }}">{{ s | title }}</option>{% endfor %}
-      </select>
+      {{ m.application_select(applications, selected_application, required=true, disabled=not ctx.registry.scannable) }}
     </div>
     <button class="btn primary" type="submit" name="chain" value="evidence"
             data-busy-label="Collecting…" {% if not ctx.registry.scannable %}disabled{% endif %}>
@@ -52,7 +48,10 @@
     <div class="right">{{ m.run_picker(run_id, ctx.runs, '/evidence', filters) }}</div>
   </div>
   <dl class="meta">
-    <dt>Target</dt><dd>{{ run.run.target_id }}</dd>
+    <dt>Target Env</dt><dd>{{ run.run.target_id | target_env }}</dd>
+    {% if run.run.application_id %}
+    <dt>Application</dt><dd>{{ run.run.application_id | application_name }}</dd>
+    {% endif %}
     <dt>Provider</dt><dd>{{ run.run.provider | upper }}</dd>
     <dt>Collected</dt><dd>{{ run.summary.by_status.get('COLLECTED', 0) }} / {{ run.summary.evidence_items }}</dd>
     <dt>Not collected</dt><dd>{{ run.summary.by_status.get('NOT_COLLECTED', 0) }}</dd>

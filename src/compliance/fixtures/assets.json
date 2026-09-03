@@ -1,12 +1,12 @@
 [
   {
     "asset_id": "AST-APP-01",
-    "name": "NextBoss-XT Application Server",
+    "name": "NetBoss-XT Application Server",
     "type": "APPLICATION_SERVER",
     "hostname": "nextboss-demo",
     "ip_address": "10.10.1.10",
     "vendor": "Enghouse",
-    "product": "NextBoss-XT",
+    "product": "NetBoss-XT",
     "version": "12.4",
     "operating_system": "RHEL 9.0",
     "management_interfaces": ["HTTPS"],
@@ -16,7 +16,7 @@
   },
   {
     "asset_id": "AST-DB-01",
-    "name": "NextBoss PostgreSQL",
+    "name": "NetBoss PostgreSQL",
     "type": "DATABASE",
     "hostname": "nextboss-db",
     "ip_address": "10.10.1.20",
@@ -36,7 +36,7 @@
     "hostname": "nextboss-ui",
     "ip_address": "10.10.1.11",
     "vendor": "Enghouse",
-    "product": "NextBoss-XT UI",
+    "product": "NetBoss-XT UI",
     "version": "12.4",
     "operating_system": "RHEL 9.0",
     "management_interfaces": ["HTTPS"],

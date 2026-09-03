@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nextboss-cra-agent"
 version = "0.1.0"
-description = "NextBoss-XT CRA Class I / Category 6 NMS Assessment POC — Flow 1"
+description = "NetBoss-XT CRA Class I / Category 6 NMS Assessment POC — Flow 1"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

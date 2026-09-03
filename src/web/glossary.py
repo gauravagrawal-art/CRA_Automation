@@ -126,6 +126,11 @@ GLOSSARY: dict[str, str] = {
     "MOCK": (
         "This run uses synthetic evidence and is not an assessment of a real target."
     ),
+    "APPLICATION": (
+        "A NetBoss-XT application in the target environment. Assessment and "
+        "remediation are scoped to the selected application: Router Monitor, "
+        "Switch Monitor, or SBC Monitor."
+    ),
     "UNCLASSIFIED": (
         "The registry defines no approved severity model, so every finding carries "
         "this value."

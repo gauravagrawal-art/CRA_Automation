@@ -18,8 +18,9 @@ from src.assessment.models import (
     SUMMARY_FIELD_BY_VERDICT,
     Verdict,
 )
+from src.display import application_label, scope_caption, target_env_label
 
-REPORT_TITLE = "NextBoss-XT CRA Technical Readiness Assessment"
+REPORT_TITLE = "NetBoss-XT CRA Technical Readiness Assessment"
 
 DISCLAIMER = (
     "This is an automated technical readiness assessment of observed host "
@@ -111,7 +112,8 @@ def _field(label: str, body: str) -> str:
 def _header(assessment: Assessment) -> str:
     meta = assessment.metadata
     rows = [
-        ("Target", meta.target_id),
+        ("Target Env", target_env_label(meta.target_id)),
+        ("Application", application_label(meta.application_id) or "—"),
         ("Scan / run ID", meta.run_id),
         ("Assessment ID", meta.assessment_id),
         ("Registry version", meta.registry_version),
@@ -389,8 +391,7 @@ def render_html(assessment: Assessment, *, assessments_dir=None) -> str:
         )
     body = (
         f"<h1>{_e(REPORT_TITLE)}</h1>"
-        f"<p class='lede'>Technical readiness assessment for "
-        f"{_e(assessment.metadata.target_id)}.</p>"
+        f"<p class='lede'>{_e(scope_caption(assessment.metadata.target_id, assessment.metadata.application_id))}.</p>"
         f"<div class='disclaimer'><strong>Scope</strong>{_e(DISCLAIMER)}</div>"
         f"{mock}"
         f"{concise_body(view, include_remediation=False)}"

@@ -11,10 +11,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.config import (
+    APPLICATIONS,
     MCP_CAPABILITY_CATALOG,
     PRODUCT_NAME,
     TARGETS_DIR,
 )
+from src.display import application_label, target_env_label
 from src.evidence.targets import MOCK_SCENARIOS, TargetProfile, load_target_profile
 from src.services import runs_service
 from src.services.registry_service import RegistryState, registry_state
@@ -52,9 +54,10 @@ class TargetOption:
 
     @property
     def label(self) -> str:
+        env = target_env_label(self.target_id)
         if self.provider == "mock":
-            return f"{self.target_id} (mock / {self.environment})"
-        return f"{self.target_id} ({self.provider} / {self.host})"
+            return env
+        return f"{env} ({self.provider} / {self.host})"
 
 
 def list_targets(targets_dir: Path | None = None) -> list[TargetOption]:
@@ -204,6 +207,18 @@ class WorkspaceContext:
             return self.latest.target_id
         target = default_target(self.targets)
         return target.target_id if target else "—"
+
+    @property
+    def target_env(self) -> str:
+        return target_env_label(self.target_id)
+
+    @property
+    def application_id(self) -> str:
+        return self.latest.application_id if self.latest else ""
+
+    @property
+    def application_name(self) -> str:
+        return application_label(self.application_id)
 
     @property
     def is_mock(self) -> bool:
@@ -404,6 +419,11 @@ def workspace() -> WorkspaceContext:
 def scenarios() -> tuple[str, ...]:
     """Mock scenarios a user may pin, straight from the target contract."""
     return MOCK_SCENARIOS
+
+
+def applications() -> tuple[tuple[str, str], ...]:
+    """Applications offered in the Target Env dropdown."""
+    return APPLICATIONS
 
 
 def target_profile_for(option: TargetOption) -> TargetProfile:

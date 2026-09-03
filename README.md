@@ -1,4 +1,4 @@
-# NextBoss-XT CRA Agent
+# NetBoss-XT CRA Agent
 
 Local-first POC for CRA Class I / Category 6 Network Management Systems.
 
@@ -86,8 +86,9 @@ nextboss-cra approve-registry --approver "Your Name" --version 1.1.0
 # Collect evidence for the latest approved registry using the mock provider
 nextboss-cra collect-evidence --target targets/nextboss-demo.mock.json
 
-# Pin a scenario, a registry version, or a reproducible run ID
+# Pin a scenario, an application, a registry version, or a reproducible run ID
 nextboss-cra collect-evidence --scenario compliant
+nextboss-cra collect-evidence --application router_monitor
 nextboss-cra collect-evidence --registry registry/approved/controls.approved.v1.1.0.json
 nextboss-cra collect-evidence --run-id RUN-DEMO-0001
 ```
@@ -289,11 +290,11 @@ banner.
 |------|------|
 | `documents/authoritative/` | Binding CRA / classification PDFs |
 | `documents/supporting/` | Guidance, ETSI, standardisation context |
-| `product/nextboss_xt_product_profile.yaml` | NextBoss-XT interfaces, ports, config paths (not a legal source) |
+| `product/nextboss_xt_product_profile.yaml` | NetBoss-XT interfaces, ports, config paths (not a legal source) |
 | `policy/security_assertions.yaml` | Internal technical assertion baseline (not CRA legal text) |
 | `targets/*.json` | Runtime target profile: where a scan runs (Flow 2) |
 
-The product profile describes what NextBoss-XT *is*; the target profile
+The product profile describes what NetBoss-XT *is*; the target profile
 describes *where* a scan runs. A target profile carries only secret
 *references* such as `credential_ref`, never key or password material.
 
@@ -325,7 +326,7 @@ the provider boundary before anything reaches disk.
 `MockProvider` serves three synthetic scenarios — `compliant`, `partial` and
 `vulnerable` — selected by the target profile's `environment` field. Fixtures
 are demo data for testing the evidence contract, not statements about real
-NextBoss-XT. `SSHProvider` is not part of this baseline; it slots in behind the
+NetBoss-XT. `SSHProvider` is not part of this baseline; it slots in behind the
 same `Provider` interface without changing the evidence contract.
 
 ## Evidence path contract

@@ -1,4 +1,4 @@
-"""Product profile loading for NextBoss-XT."""
+"""Product profile loading for NetBoss-XT."""
 
 from __future__ import annotations
 

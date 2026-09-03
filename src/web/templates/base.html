@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ page_title }} — NextBoss-XT CRA</title>
+  <title>{{ page_title }} — NetBoss-XT CRA</title>
   <link rel="stylesheet" href="/static/app.css">
   <link rel="icon" href="data:,">
 </head>
@@ -13,7 +13,7 @@
 
   <nav class="sidebar" aria-label="Primary">
     <a class="brand" href="/">
-      <span class="mark">NextBoss-XT CRA</span>
+      <span class="mark">NetBoss-XT CRA</span>
       <span class="sub">Readiness assessment</span>
     </a>
 
@@ -45,7 +45,10 @@
     <header class="topbar">
       <h1>CRA Readiness Assessment</h1>
       <div class="ctx">
-        <span class="item">Target <b>{{ ctx.target_id }}</b></span>
+        <span class="item">Target Env <b>{{ ctx.target_env }}</b></span>
+        {% if ctx.application_name %}
+        <span class="item">Application <b>{{ ctx.application_name }}</b></span>
+        {% endif %}
         <span class="item">Provider <b>{{ ctx.provider | upper }}</b></span>
         <span class="item" title="{{ explain(ctx.registry.status) }}">Registry <b>{{ ctx.registry.label }}</b></span>
         <span class="item">Last run <b>{{ ctx.last_run_at | ts }}</b></span>

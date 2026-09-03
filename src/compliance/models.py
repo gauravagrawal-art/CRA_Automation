@@ -198,6 +198,7 @@ class AssessmentView(BaseModel):
     run_id: str = ""
     assessment_id: str = ""
     target_id: str = ""
+    application_id: str = ""
     provider: str = ""
     registry_version: str = ""
     registry_hash: str = ""

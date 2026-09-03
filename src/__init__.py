@@ -1,1 +1,1 @@
-"""NextBoss-XT CRA Agent — Flow 1."""
+"""NetBoss-XT CRA Agent — Flow 1."""

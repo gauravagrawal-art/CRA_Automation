@@ -11,7 +11,7 @@
   </div>
   <dl class="meta">
     <dt>Tool</dt><dd class="mono">{{ item.tool }}</dd>
-    <dt>Target</dt><dd>{{ item.target_id }} ({{ item.provider | upper }})</dd>
+    <dt>Target Env</dt><dd>{{ item.target_id | target_env }} ({{ item.provider | upper }})</dd>
     <dt>Collected at</dt><dd>{{ item.collected_at | ts }}</dd>
     <dt>Call ID</dt><dd class="mono">{{ item.call_id }}</dd>
     <dt>Parameters</dt><dd class="mono wrap">{{ item.parameters_redacted or 'None' }}</dd>

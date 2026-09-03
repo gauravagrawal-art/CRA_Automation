@@ -9,7 +9,7 @@
   <form method="post" action="/actions/assessment/run" class="inline" style="margin-bottom:.4rem">
     <input type="hidden" name="run_id" value="{{ r.run_id }}">
     <span class="mono small">{{ r.run_id }}</span>
-    <span class="small muted">{{ r.target_id }}</span>
+    <span class="small muted">{{ scope_short(r.target_id, r.application_id) }}</span>
     <button class="btn small primary" type="submit" data-busy-label="Assessing…">Run assessment</button>
   </form>
   {% endfor %}
@@ -40,6 +40,7 @@
   <p class="overall {{ 'fail' if 'ATTENTION' in s.overall_status.value else ('review' if 'REVIEW' in s.overall_status.value else 'pass') }}">
     Overall Status: <strong>{{ s.overall_status.value }}</strong>
   </p>
+  {{ m.scope_line(view.target_id, view.application_id) }}
   <ul class="tiles compact">
     <li class="tile accent"><span class="k">Assets</span><span class="n">{{ s.assets_assessed }}</span></li>
     <li class="tile accent"><span class="k">Controls</span><span class="n">{{ s.controls_assessed }}</span></li>

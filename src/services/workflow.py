@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.assessment.runner import assess
+from src.display import application_label, resolve_application_id
 from src.evidence.runner import collect_evidence
 from src.remediation.runner import remediate, verify_runs
 from src.services import runs_service
@@ -191,6 +192,16 @@ def _resolve_scenario(option: TargetOption, scenario: str | None) -> str | None:
     return scenario
 
 
+def _resolve_application(application: str | None) -> str:
+    from src.display import known_application, normalize_application_id
+
+    if not application:
+        return resolve_application_id(None)
+    if not known_application(application):
+        raise WorkflowError(f"Unknown application '{application}'.")
+    return normalize_application_id(application)
+
+
 @dataclass
 class ScanRequest:
     """A validated scan request. Built server-side; never trusted from the form."""
@@ -198,6 +209,7 @@ class ScanRequest:
     target: TargetOption
     registry_path: Path
     scenario: str | None = None
+    application_id: str = ""
     then_assess: bool = False
     then_remediate: bool = False
     previous_run: str | None = None
@@ -207,11 +219,13 @@ def plan_scan(
     *,
     target_key: str,
     scenario: str | None = None,
+    application: str | None = None,
     chain: str = "evidence",
     previous_run: str | None = None,
 ) -> ScanRequest:
     """Validate a scan request and resolve everything it needs, before starting."""
     option = _resolve_target(target_key)
+    application_id = _resolve_application(application)
     try:
         registry_path = resolve_registry_path()
     except RegistryServiceError as exc:
@@ -224,6 +238,7 @@ def plan_scan(
         target=option,
         registry_path=registry_path,
         scenario=_resolve_scenario(option, scenario),
+        application_id=application_id,
         then_assess=chain in ("full", "verify"),
         then_remediate=chain in ("full", "verify"),
         previous_run=previous_run,
@@ -236,6 +251,10 @@ def start_scan(request: ScanRequest) -> Job:
     def work(handle: JobHandle) -> None:
         handle.step(f"Registry validated: {request.registry_path.name}")
         handle.step(f"Target resolved: {request.target.target_id} ({request.target.provider})")
+        if request.application_id:
+            handle.step(
+                f"Application: {application_label(request.application_id) or request.application_id}"
+            )
         if request.scenario:
             handle.step(f"Mock scenario pinned: {request.scenario}")
 
@@ -244,6 +263,7 @@ def start_scan(request: ScanRequest) -> Job:
             registry_path=request.registry_path,
             target_path=request.target.path,
             scenario_override=request.scenario,
+            application_id=request.application_id,
         )
         run_id = run.run.run_id
         handle.set_run_id(run_id)

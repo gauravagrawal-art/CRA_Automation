@@ -186,6 +186,7 @@ def build_assessment(
         provider=pre.run.run.provider,
         generated_at=generated_at,
         llm_narration="enabled" if provider is not None else "disabled",
+        application_id=pre.run.run.application_id,
     )
 
     return Assessment(

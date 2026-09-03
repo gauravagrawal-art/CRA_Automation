@@ -124,7 +124,7 @@
     <select id="run-pick" name="run" onchange="this.form.submit()">
       {% for r in runs %}
       <option value="{{ r.run_id }}" {% if r.run_id == run_id %}selected{% endif %}>
-        {{ r.run_id }} — {{ r.target_id }} ({{ r.stage_label }})
+        {{ r.run_id }} — {{ scope_short(r.target_id, r.application_id) }} ({{ r.stage_label }})
       </option>
       {% endfor %}
     </select>
@@ -132,4 +132,19 @@
   <noscript><button class="btn small" type="submit">Show</button></noscript>
 </form>
 {% endif %}
+{% endmacro %}
+
+{% macro application_select(apps, selected='', required=false, disabled=false) %}
+<label for="application">Application</label>
+<select id="application" name="application"{% if required %} required{% endif %}{% if disabled %} disabled{% endif %}>
+  {% for id, name in apps %}
+  <option value="{{ id }}" {% if id == selected or (not selected and id == DEFAULT_APPLICATION_ID) %}selected{% endif %}>
+    {{ name }}
+  </option>
+  {% endfor %}
+</select>
+{% endmacro %}
+
+{% macro scope_line(target_id, application_id='', verb='Assessment done on') %}
+<p class="scope">{{ scope_caption(target_id, application_id, verb) }}</p>
 {% endmacro %}

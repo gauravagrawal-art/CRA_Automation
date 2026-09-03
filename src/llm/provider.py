@@ -47,7 +47,7 @@ class NullProvider(LLMProvider):
     ) -> tuple[str, str]:
         interpretation = (
             f"NMS interpretation for {etsi_requirement_id}: apply requirement to "
-            f"NextBoss-XT management plane based on declared product profile."
+            f"NetBoss-XT management plane based on declared product profile."
         )
         technical = (
             f"Verify host-level observable configuration supporting: {requirement_text[:120]}"

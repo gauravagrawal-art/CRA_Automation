@@ -19,6 +19,7 @@
     </div>
   </div>
   <p class="lede">{{ control.title }}</p>
+  {{ m.scope_line(view.target_id, view.application_id) }}
   {% if assets %}
   <p class="small muted">Asset{% if assets|length > 1 %}s{% endif %}:
     {{ assets | map(attribute='name') | join(', ') }}

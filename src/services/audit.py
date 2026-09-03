@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from src.display import application_label, target_env_label
 from src.lifecycle.store import load_lifecycle
 from src.services import runs_service
 from src.services.registry_service import registry_state
@@ -71,8 +72,13 @@ def collect_audit_log() -> AuditLog:
                     at=meta.generated_at,
                     subject=meta.run_id,
                     detail=(
-                        f"Target {meta.target_id} · registry {meta.registry_version} "
-                        f"· provider {meta.provider}"
+                        f"Target Env: {target_env_label(meta.target_id)}"
+                        + (
+                            f" · Application: {application_label(meta.application_id)}"
+                            if meta.application_id
+                            else ""
+                        )
+                        + f" · registry {meta.registry_version} · provider {meta.provider}"
                     ),
                     run_id=meta.run_id,
                 )

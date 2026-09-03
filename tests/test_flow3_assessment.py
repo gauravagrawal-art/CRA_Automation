@@ -712,6 +712,24 @@ def test_source_traceability_is_copied_exactly(vulnerable_preflight, vulnerable_
         assert result.source_traceability == approved["source_traceability"]
 
 
+def test_assessment_copies_application_id_into_metadata_and_report(
+    scenario_runs, tmp_path
+):
+    path = _tampered_evidence(
+        scenario_runs["vulnerable"],
+        tmp_path,
+        lambda d: d["run"].update({"application_id": "sbc_monitor"}),
+        "RUN-F3-VULNERABLE",
+    )
+    pre = preflight(registry_path=APPROVED_PATH, evidence_path=path)
+    assessment = build_assessment(pre, clock=fixed_clock)
+    assert assessment.metadata.application_id == "sbc_monitor"
+    html = render_html(assessment)
+    assert "Target Env" in html
+    assert "SBC Monitor" in html
+    assert "NetBoss-XT" in html
+
+
 # --- End-to-end -------------------------------------------------------------
 
 

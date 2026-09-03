@@ -499,6 +499,7 @@ class MockComplianceProvider:
             run_id=meta.run_id,
             assessment_id=meta.assessment_id,
             target_id=meta.target_id,
+            application_id=meta.application_id,
             provider=meta.provider,
             registry_version=meta.registry_version,
             registry_hash=meta.registry_hash,

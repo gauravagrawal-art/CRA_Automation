@@ -1,7 +1,7 @@
 """Runtime target profile — where a scan runs.
 
 This is deliberately distinct from the product profile used by Agent 1. The
-product profile describes what NextBoss-XT *is* (ports, interfaces, config
+product profile describes what NetBoss-XT *is* (ports, interfaces, config
 paths); the target profile describes *where* this particular scan runs. Product
 facts already carried by an approved control are not duplicated here.
 """

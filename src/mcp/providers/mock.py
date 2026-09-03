@@ -1,7 +1,7 @@
 """Deterministic mock provider backed by synthetic fixtures.
 
 Fixtures are synthetic demo data used to exercise the evidence contract. They
-are NOT assertions about real NextBoss-XT, and they deliberately encode no
+are NOT assertions about real NetBoss-XT, and they deliberately encode no
 compliance verdict — a scenario name describes the shape of the synthetic
 target, not a conclusion about it.
 """

@@ -344,3 +344,17 @@ def test_evidence_document_is_written_to_disk(run_result):
     assert document["run"]["run_id"] == "RUN-TEST-BASELINE"
     assert len(document["evidence"]) == len(run.evidence)
     assert document["summary"]["mcp_calls_planned"] == 19
+
+
+def test_application_id_is_recorded_on_the_run(tmp_path):
+    _, run = collect_evidence(
+        registry_path=APPROVED_PATH,
+        target_path=TARGET_PATH,
+        output_dir=tmp_path,
+        run_id="RUN-TEST-APP",
+        application_id="switch_monitor",
+        clock=fixed_clock,
+    )
+    assert run.run.application_id == "switch_monitor"
+    stored = json.loads((tmp_path / "RUN-TEST-APP" / "evidence.json").read_text())
+    assert stored["run"]["application_id"] == "switch_monitor"

@@ -16,11 +16,20 @@ PRODUCT_PROFILE_PATH = PRODUCT_DIR / "nextboss_xt_product_profile.yaml"
 SECURITY_ASSERTIONS_PATH = POLICY_DIR / "security_assertions.yaml"
 TO_BE_PROVIDED = "<TO_BE_PROVIDED>"
 
-PRODUCT_NAME = "NextBoss-XT"
+PRODUCT_NAME = "NetBoss-XT"
 PRODUCT_TYPE = "Network Management System"
 CRA_CLASS = "I"
 CRA_CATEGORY = "6"
 CRA_CATEGORY_NAME = "Network Management Systems"
+
+# User-facing applications in the Target Env. Internal mock scenarios
+# (vulnerable / partial / compliant) remain a CLI/fixture concern.
+APPLICATIONS: tuple[tuple[str, str], ...] = (
+    ("router_monitor", "Router Monitor"),
+    ("switch_monitor", "Switch Monitor"),
+    ("sbc_monitor", "SBC Monitor"),
+)
+DEFAULT_APPLICATION_ID = "router_monitor"
 
 EXPECTED_AUTHORITATIVE = [
     "CELEX_02024R2847-20241120_EN_TXT.pdf",

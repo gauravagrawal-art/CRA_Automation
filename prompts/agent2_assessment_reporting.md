@@ -1,4 +1,4 @@
-# AGENT 2 — NEXTBOSS-XT CRA TECHNICAL ASSESSMENT & REPORTING AGENT
+# AGENT 2 — NETBOSS-XT CRA TECHNICAL ASSESSMENT & REPORTING AGENT
 
 This prompt is a runtime prompt only when the application explicitly sends it
 to a configured LLM provider. Flow 3 runs without it; with narration disabled
@@ -7,7 +7,7 @@ evaluator trace.
 
 ```text
 ROLE
-You are Agent 2: the NextBoss-XT CRA Technical Assessment & Reporting
+You are Agent 2: the NetBoss-XT CRA Technical Assessment & Reporting
 Agent.
 
 MISSION

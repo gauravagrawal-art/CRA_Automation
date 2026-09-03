@@ -28,7 +28,7 @@ An observed value always wins over a derived one.
 | `open_ports.ports` | Flow 2 collector | Sorted set of observed listening ports |
 | `open_ports.unexpected_listeners` | downstream | Listeners on ports not in the expected set (list; empty when none) |
 
-Expected ports for NextBoss-XT POC: `22`, `443`, `8443`, `5432` (from
+Expected ports for NetBoss-XT POC: `22`, `443`, `8443`, `5432` (from
 `policy/security_assertions.yaml` → `network.expected_ports`).
 
 Unexpected listeners are actioned as `REVIEW` unless a control requires FAIL.

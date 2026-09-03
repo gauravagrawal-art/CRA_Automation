@@ -18,6 +18,9 @@
     Remediation actions require propose → approve → apply (demo target only).
     Application does <strong>not</strong> close the finding; re-scan and verify with fresh evidence.
   </p>
+  {% if view %}
+  {{ m.scope_line(view.target_id, view.application_id, verb='Remediation for') }}
+  {% endif %}
 
   {% if not remediation %}
   <form method="post" action="/actions/remediation/compose" class="inline">
@@ -157,7 +160,7 @@
   <form method="post" action="/actions/rescan-verify" class="filters"
         data-confirm="Start a new read-only scan and verify against the selected previous run?">
     <div class="field-inline">
-      <label for="target">Target</label>
+      <label for="target">Target Env</label>
       <select id="target" name="target" required>
         {% for t in targets %}
         <option value="{{ t.key }}" {% if not t.supported %}disabled{% endif %}
@@ -178,11 +181,7 @@
       </select>
     </div>
     <div class="field-inline">
-      <label for="scenario">Mock environment</label>
-      <select id="scenario" name="scenario">
-        <option value="">Use target default</option>
-        {% for s in scenarios %}<option value="{{ s }}">{{ s | title }}</option>{% endfor %}
-      </select>
+      {{ m.application_select(applications, selected_application) }}
     </div>
     <button class="btn primary" type="submit" data-busy-label="Re-scanning…"
             {% if not ctx.registry.scannable or not assessed_runs %}disabled{% endif %}>

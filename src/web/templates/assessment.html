@@ -10,7 +10,7 @@
   <form method="post" action="/actions/assessment/run" class="inline" style="margin-bottom:.4rem">
     <input type="hidden" name="run_id" value="{{ r.run_id }}">
     <span class="mono small">{{ r.run_id }}</span>
-    <span class="small muted">{{ r.target_id }} · {{ r.started_at | ts }}</span>
+    <span class="small muted">{{ scope_short(r.target_id, r.application_id) }} · {{ r.started_at | ts }}</span>
     <button class="btn small primary" type="submit" data-busy-label="Assessing…">Run assessment</button>
   </form>
   {% endfor %}
@@ -38,7 +38,11 @@
   </div>
   <dl class="meta">
     <dt>Run</dt><dd class="mono">{{ meta.run_id }}</dd>
-    <dt>Target</dt><dd>{{ meta.target_id }} ({{ meta.provider | upper }})</dd>
+    <dt>Target Env</dt><dd>{{ meta.target_id | target_env }}</dd>
+    {% if meta.application_id %}
+    <dt>Application</dt><dd>{{ meta.application_id | application_name }}</dd>
+    {% endif %}
+    <dt>Provider</dt><dd>{{ meta.provider | upper }}</dd>
     <dt>Registry</dt><dd>v{{ meta.registry_version }} <span class="mono small">{{ meta.registry_hash | short(16) }}</span></dd>
     <dt>Generated</dt><dd>{{ meta.generated_at | ts }}</dd>
     <dt>AI narration</dt><dd>{{ meta.llm_narration }}</dd>

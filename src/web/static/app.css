@@ -1,4 +1,4 @@
-/* NextBoss-XT CRA UI.
+/* NetBoss-XT CRA UI.
    Status colours match src/assessment/report.py so the app and the generated
    HTML reports read as one product. Status is always carried by text as well
    as colour. */
@@ -128,6 +128,12 @@ a:hover { text-decoration: underline; }
 .ctx { display: flex; flex-wrap: wrap; gap: .35rem .9rem; margin-left: auto; }
 .ctx .item { font-size: .78rem; color: var(--muted); }
 .ctx .item b { color: var(--ink); font-weight: 600; }
+
+.scope {
+  margin: .35rem 0 0;
+  color: var(--muted);
+  font-size: .9rem;
+}
 
 .caps { display: flex; gap: .35rem; flex-wrap: wrap; }
 .cap {

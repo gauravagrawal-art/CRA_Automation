@@ -49,7 +49,7 @@ def ingested():
 
 def test_product_profile_loads_and_preserves_to_be_provided(profile_and_policy):
     profile, profile_sha, _, _ = profile_and_policy
-    assert profile.product.name == "NextBoss-XT"
+    assert profile.product.name == "NetBoss-XT"
     assert profile.platform.operating_system == "RHEL"
     assert {i.port for i in profile.interfaces} == {22, 443, 8443, 5432}
     assert profile.configuration.tls_config_file == TO_BE_PROVIDED

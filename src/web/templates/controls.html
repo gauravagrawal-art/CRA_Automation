@@ -13,6 +13,7 @@
       {{ m.run_picker(view.run_id, ctx.runs | selectattr('has_assessment') | list, '/controls', filters) }}
     </div>
   </div>
+  {{ m.scope_line(view.target_id, view.application_id) }}
 </div>
 
 <form method="get" action="/controls" class="filters">

@@ -22,11 +22,18 @@ from src.assessment.models import Verdict
 from src.compliance.models import UIStatus
 from src.compliance.provider import get_compliance_provider
 from src.config import (
+    DEFAULT_APPLICATION_ID,
     MCP_CAPABILITY_CATALOG,
     MCP_PATH_ALLOWLIST,
     POLICY_DIR,
     PRODUCT_DIR,
     PROJECT_ROOT,
+)
+from src.display import (
+    application_label,
+    scope_caption,
+    scope_short,
+    target_env_label,
 )
 from src.evidence.models import CollectionStatus
 from src.lifecycle.service import (
@@ -61,7 +68,7 @@ BASE_DIR = Path(__file__).resolve().parent
 PAGE_SIZE = 50
 
 app = FastAPI(
-    title="NextBoss-XT CRA Technical Readiness",
+    title="NetBoss-XT CRA Technical Readiness",
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
@@ -132,8 +139,13 @@ templates.env.filters["short"] = _short
 templates.env.filters["pretty"] = _pretty
 templates.env.filters["tojson"] = _tojson
 templates.env.filters["unique"] = _unique
+templates.env.filters["target_env"] = target_env_label
+templates.env.filters["application_name"] = application_label
 templates.env.globals["explain"] = explain
 templates.env.globals["query"] = _query
+templates.env.globals["scope_caption"] = scope_caption
+templates.env.globals["scope_short"] = scope_short
+templates.env.globals["DEFAULT_APPLICATION_ID"] = DEFAULT_APPLICATION_ID
 templates.env.globals["Verdict"] = Verdict
 templates.env.globals["VERDICT_ORDER"] = charts.VERDICT_ORDER
 templates.env.globals["UIStatus"] = UIStatus
@@ -473,7 +485,8 @@ def evidence_page(request: Request) -> Response:
         matched=len(filtered),
         pager=pager,
         filters=params,
-        scenarios=context.scenarios(),
+        applications=context.applications(),
+        selected_application=run.run.application_id if run else DEFAULT_APPLICATION_ID,
     )
 
 
@@ -580,7 +593,10 @@ def remediation_page(request: Request) -> Response:
         previous_run=runs_service.previous_assessed_run(run_id) if run_id else None,
         assessed_runs=[r for r in runs_service.list_runs() if r.has_assessment],
         targets=context.list_targets(),
-        scenarios=context.scenarios(),
+        applications=context.applications(),
+        selected_application=(
+            view.application_id if view and view.application_id else DEFAULT_APPLICATION_ID
+        ),
     )
 
 
@@ -775,13 +791,13 @@ def action_approve(
 def action_collect(
     request: Request,
     target: str = Form(...),
-    scenario: str = Form(""),
+    application: str = Form(""),
     chain: str = Form("evidence"),
 ) -> Response:
     def run() -> RedirectResponse:
         plan = workflow.plan_scan(
             target_key=target,
-            scenario=scenario or None,
+            application=application or None,
             chain="full" if chain == "full" else "evidence",
         )
         job = workflow.start_scan(plan)
@@ -830,7 +846,7 @@ def action_rescan_verify(
     request: Request,
     target: str = Form(...),
     previous_run: str = Form(...),
-    scenario: str = Form(""),
+    application: str = Form(""),
 ) -> Response:
     """Re-scan and verify: Flow 2, then Flow 3, then Flow 4 verification.
 
@@ -841,7 +857,7 @@ def action_rescan_verify(
     def run() -> RedirectResponse:
         plan = workflow.plan_scan(
             target_key=target,
-            scenario=scenario or None,
+            application=application or None,
             chain="verify",
             previous_run=previous_run,
         )

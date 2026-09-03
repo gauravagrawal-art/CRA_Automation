@@ -78,6 +78,7 @@ def build_remediation(
             assessment_sha256=pre.assessment_sha256,
             provider=meta.provider,
             generated_at=generated_at,
+            application_id=meta.application_id,
         ),
         summary=summarize(items, controls_assessed=len(assessment.results)),
         items=items,

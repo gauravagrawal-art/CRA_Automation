@@ -157,6 +157,7 @@ class RemediationMetadata(BaseModel):
     assessment_sha256: str
     provider: str
     generated_at: str
+    application_id: str = ""
     schema_version: str = REMEDIATION_SCHEMA_VERSION
 
 

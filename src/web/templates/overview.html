@@ -28,8 +28,8 @@
   <li>
     <a class="tile accent" href="/evidence">
       <span class="k">Current target</span>
-      <span class="n sm">{{ ctx.target_id }}</span>
-      <span class="sub">{{ ctx.provider | upper }} provider</span>
+      <span class="n sm">{{ ctx.target_env }}</span>
+      <span class="sub">{% if ctx.application_name %}{{ ctx.application_name }} · {% endif %}{{ ctx.provider | upper }} provider</span>
     </a>
   </li>
   <li>
@@ -103,7 +103,7 @@
   <table>
     <thead>
       <tr>
-        <th>Run ID</th><th>Target</th><th>Provider</th><th>Stage</th>
+        <th>Run ID</th><th>Target Env</th><th>Provider</th><th>Stage</th>
         <th class="num">Open</th><th class="num">Closed</th><th>Started</th><th></th>
       </tr>
     </thead>
@@ -111,7 +111,7 @@
       {% for r in ctx.runs[:5] %}
       <tr>
         <td class="mono nowrap">{{ r.run_id }}</td>
-        <td>{{ r.target_id or '—' }}</td>
+        <td>{{ scope_short(r.target_id, r.application_id) }}</td>
         <td>{{ r.provider | upper or '—' }}</td>
         <td>{{ r.stage_label }}</td>
         <td class="num">{{ r.open_findings }}</td>

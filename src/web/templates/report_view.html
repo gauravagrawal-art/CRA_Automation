@@ -37,6 +37,7 @@
   <p class="overall {{ 'fail' if 'ATTENTION' in s.overall_status.value else ('review' if 'REVIEW' in s.overall_status.value else 'pass') }}">
     Overall Status: <strong>{{ s.overall_status.value }}</strong>
   </p>
+  {{ m.scope_line(view.target_id, view.application_id) }}
   <ul class="tiles compact">
     <li class="tile accent"><span class="k">Assets</span><span class="n">{{ s.assets_assessed }}</span></li>
     <li class="tile accent"><span class="k">Controls</span><span class="n">{{ s.controls_assessed }}</span></li>

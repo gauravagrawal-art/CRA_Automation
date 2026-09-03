@@ -123,6 +123,7 @@ class RunOverview:
 
     run_id: str
     target_id: str = ""
+    application_id: str = ""
     provider: str = ""
     registry_version: str = ""
     registry_hash: str = ""
@@ -184,6 +185,7 @@ def run_overview(run_id: str) -> RunOverview:
     if evidence is not None:
         overview.has_evidence = True
         overview.target_id = evidence.run.target_id
+        overview.application_id = evidence.run.application_id
         overview.provider = evidence.run.provider
         overview.registry_version = evidence.run.registry_version
         overview.registry_hash = evidence.run.registry_hash
@@ -193,6 +195,7 @@ def run_overview(run_id: str) -> RunOverview:
     if assessment is not None:
         overview.has_assessment = True
         overview.target_id = assessment.metadata.target_id
+        overview.application_id = overview.application_id or assessment.metadata.application_id
         overview.provider = assessment.metadata.provider
         overview.registry_version = assessment.metadata.registry_version
         overview.registry_hash = assessment.metadata.registry_hash
@@ -210,6 +213,9 @@ def run_overview(run_id: str) -> RunOverview:
 
     if remediation is not None:
         overview.has_remediation = True
+        overview.application_id = (
+            overview.application_id or remediation.metadata.application_id
+        )
         overview.action_counts = dict(remediation.summary.by_action_type)
         overview.open_findings = remediation.summary.by_status.get(
             RemediationStatus.OPEN.value, 0

@@ -17,7 +17,8 @@
     <thead>
       <tr>
         <th>Run ID</th>
-        <th>Target</th>
+        <th>Target Env</th>
+        <th>Application</th>
         <th>Provider</th>
         <th>Registry</th>
         <th>Started</th>
@@ -30,7 +31,8 @@
       {% for r in runs %}
       <tr>
         <td class="mono nowrap"><a href="/runs/{{ r.run_id }}">{{ r.run_id }}</a></td>
-        <td>{{ r.target_id or '—' }}</td>
+        <td>{{ r.target_id | target_env }}</td>
+        <td>{{ r.application_id | application_name or '—' }}</td>
         <td>{{ r.provider | upper or '—' }}</td>
         <td class="small">
           {% if r.registry_version %}v{{ r.registry_version }}{% else %}—{% endif %}
