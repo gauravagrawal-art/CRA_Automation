@@ -18,6 +18,7 @@ from typing import Any, Callable, TypeVar
 from src.assessment.models import Assessment, Verdict
 from src.config import ASSESSMENTS_DIR, EVIDENCE_DIR
 from src.evidence.models import EvidenceRun
+from src.lifecycle.models import LifecycleDocument
 from src.remediation.models import (
     ActionType,
     RemediationDocument,
@@ -72,6 +73,10 @@ def remediation_path(run_id: str, assessments_dir: Path | None = None) -> Path:
     return (assessments_dir or ASSESSMENTS_DIR) / run_id / "remediation.json"
 
 
+def lifecycle_path(run_id: str, assessments_dir: Path | None = None) -> Path:
+    return (assessments_dir or ASSESSMENTS_DIR) / run_id / "lifecycle.json"
+
+
 def verification_path(run_id: str, assessments_dir: Path | None = None) -> Path:
     return (assessments_dir or ASSESSMENTS_DIR) / run_id / "verification.json"
 
@@ -94,6 +99,13 @@ def load_assessment(run_id: str) -> Assessment | None:
 
 def load_remediation(run_id: str) -> RemediationDocument | None:
     return _load_cached(remediation_path(run_id), RemediationDocument.model_validate)
+
+
+def load_lifecycle(run_id: str) -> LifecycleDocument | None:
+    path = lifecycle_path(run_id)
+    if not path.exists():
+        return None
+    return _load_cached(path, LifecycleDocument.model_validate)
 
 
 def load_verification(run_id: str) -> VerificationDocument | None:

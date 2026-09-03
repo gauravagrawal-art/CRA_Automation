@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block content %}
+
+{% if not view %}
+<div class="panel"><p class="empty">No assessment yet. Open <a href="/">Assessment</a> first.</p></div>
+{% else %}
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Findings</h2>
+    <div class="right">
+      {{ m.run_picker(view.run_id, ctx.runs | selectattr('has_assessment') | list, '/findings', filters) }}
+    </div>
+  </div>
+  <p class="lede">Failed, human-review, and remediation-pending items. Each finding is tied to one control and one asset.</p>
+</div>
+
+<form method="get" action="/findings" class="filters">
+  <input type="hidden" name="run" value="{{ view.run_id }}">
+  <div class="field-inline">
+    <label for="status">Status</label>
+    <select id="status" name="status">
+      <option value="">All</option>
+      <option value="FAIL" {% if filters.get('status') == 'FAIL' %}selected{% endif %}>FAIL</option>
+      <option value="REVIEW" {% if filters.get('status') == 'REVIEW' %}selected{% endif %}>Human Review</option>
+      <option value="REMEDIATION_PENDING" {% if filters.get('status') == 'REMEDIATION_PENDING' %}selected{% endif %}>Remediation Pending</option>
+    </select>
+  </div>
+  <button class="btn" type="submit">Apply</button>
+  <a class="btn" href="/findings?run={{ view.run_id }}">Clear</a>
+</form>
+
+{% if findings %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Control</th><th>Asset</th><th>Status</th><th>Severity</th><th>Finding</th></tr>
+    </thead>
+    <tbody>
+      {% for f in findings %}
+      <tr>
+        <td class="mono nowrap">
+          <a href="/assessment/control/{{ f.control_id }}?run={{ view.run_id }}">{{ f.control_id }}</a>
+          <div class="small muted">{{ f.control_title | truncate(60) }}</div>
+        </td>
+        <td>{{ f.asset_name }}</td>
+        <td>{{ m.badge(f.status) }}</td>
+        <td>{{ f.severity.value }}</td>
+        <td>{{ f.finding }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{{ m.pager(pager, filters, '/findings') }}
+{% else %}
+<div class="panel"><p class="empty">No findings for this run.</p></div>
+{% endif %}
+
+{% endif %}
+{% endblock %}

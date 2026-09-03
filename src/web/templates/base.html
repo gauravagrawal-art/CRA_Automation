@@ -14,39 +14,27 @@
   <nav class="sidebar" aria-label="Primary">
     <a class="brand" href="/">
       <span class="mark">NextBoss-XT CRA</span>
-      <span class="sub">Technical readiness workspace</span>
+      <span class="sub">Readiness assessment</span>
     </a>
 
     <div class="nav-group">
+      <h2>Compliance workflow</h2>
       <div class="nav">
-        <a href="/" {% if nav == 'overview' %}aria-current="page"{% endif %}>Overview</a>
+        <a href="/" {% if nav == 'assessment' %}aria-current="page"{% endif %}>Assessment</a>
+        <a href="/controls" {% if nav == 'controls' %}aria-current="page"{% endif %}>Controls</a>
+        <a href="/evidence" {% if nav == 'evidence' %}aria-current="page"{% endif %}>Evidence</a>
+        <a href="/findings" {% if nav == 'findings' %}aria-current="page"{% endif %}>
+          Findings{% if ctx.open_findings %}<span class="count">{{ ctx.open_findings }}</span>{% endif %}
+        </a>
+        <a href="/remediation" {% if nav == 'remediation' %}aria-current="page"{% endif %}>Remediation</a>
+        <a href="/reports" {% if nav == 'reports' %}aria-current="page"{% endif %}>Report</a>
       </div>
     </div>
 
     <div class="nav-group">
-      <h2>Assessment workflow</h2>
+      <h2>Setup</h2>
       <div class="nav">
-        <a href="/registry" {% if nav == 'registry' %}aria-current="page"{% endif %}>
-          <span class="step-n">1</span> Sources &amp; Registry
-        </a>
-        <a href="/evidence" {% if nav == 'evidence' %}aria-current="page"{% endif %}>
-          <span class="step-n">2</span> Evidence
-        </a>
-        <a href="/assessment" {% if nav == 'assessment' %}aria-current="page"{% endif %}>
-          <span class="step-n">3</span> Assessment
-        </a>
-        <a href="/remediation" {% if nav == 'remediation' %}aria-current="page"{% endif %}>
-          <span class="step-n">4</span> Remediation &amp; Verify
-          {% if ctx.open_findings %}<span class="count">{{ ctx.open_findings }}</span>{% endif %}
-        </a>
-      </div>
-    </div>
-
-    <div class="nav-group">
-      <div class="nav">
-        <a href="/reports" {% if nav == 'reports' %}aria-current="page"{% endif %}>
-          Reports{% if ctx.runs %}<span class="count">{{ ctx.runs | length }}</span>{% endif %}
-        </a>
+        <a href="/registry" {% if nav == 'registry' %}aria-current="page"{% endif %}>Sources &amp; Registry</a>
         <a href="/settings" {% if nav == 'settings' %}aria-current="page"{% endif %}>Settings</a>
       </div>
     </div>
@@ -54,19 +42,12 @@
 
   <div class="main">
     <header class="topbar">
-      <h1>NextBoss-XT CRA Technical Readiness</h1>
+      <h1>CRA Readiness Assessment</h1>
       <div class="ctx">
         <span class="item">Target <b>{{ ctx.target_id }}</b></span>
         <span class="item">Provider <b>{{ ctx.provider | upper }}</b></span>
         <span class="item" title="{{ explain(ctx.registry.status) }}">Registry <b>{{ ctx.registry.label }}</b></span>
         <span class="item">Last run <b>{{ ctx.last_run_at | ts }}</b></span>
-        <span class="caps">
-          {% for cap in ctx.capabilities %}
-            <span class="cap {% if cap.available %}on{% endif %}" title="{{ cap.detail }}">
-              {{ cap.name }}: {{ cap.label }}
-            </span>
-          {% endfor %}
-        </span>
       </div>
     </header>
 
@@ -92,7 +73,7 @@
       {% endif %}
 
       {% block stepper %}
-        {% if nav in ('registry', 'evidence', 'assessment', 'remediation') %}
+        {% if nav in ('assessment', 'controls', 'evidence', 'findings', 'remediation', 'reports') %}
           {% include 'partials/stepper.html' %}
         {% endif %}
       {% endblock %}
@@ -100,10 +81,8 @@
       {% block content %}{% endblock %}
 
       <footer class="foot">
-        This is an automated technical readiness assessment of observed host configuration.
-        It is not a CRA certification, not a declaration of conformity, and not a statement of
-        legal compliance. Verdicts describe only what the cited evidence shows at the time of
-        collection.
+        Automated technical readiness assessment of observed configuration.
+        Not CRA certification or a statement of legal conformity.
       </footer>
     </main>
   </div>

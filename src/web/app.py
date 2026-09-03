@@ -19,6 +19,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from src.assessment.models import Verdict
+from src.compliance.models import UIStatus
+from src.compliance.provider import get_compliance_provider
 from src.config import (
     MCP_CAPABILITY_CATALOG,
     MCP_PATH_ALLOWLIST,
@@ -27,6 +29,7 @@ from src.config import (
     PROJECT_ROOT,
 )
 from src.evidence.models import CollectionStatus
+from src.lifecycle.service import LifecycleError, analyse_evidence, apply_remediation, refresh_reports
 from src.registry.models import ApplicabilityStatus, EvidenceMode
 from src.remediation.models import ActionType, RemediationStatus
 from src.services import context, runs_service, workflow
@@ -125,11 +128,13 @@ templates.env.globals["explain"] = explain
 templates.env.globals["query"] = _query
 templates.env.globals["Verdict"] = Verdict
 templates.env.globals["VERDICT_ORDER"] = charts.VERDICT_ORDER
+templates.env.globals["UIStatus"] = UIStatus
 templates.env.globals["CollectionStatus"] = CollectionStatus
 templates.env.globals["ActionType"] = ActionType
 templates.env.globals["RemediationStatus"] = RemediationStatus
 templates.env.globals["ApplicabilityStatus"] = ApplicabilityStatus
 templates.env.globals["EvidenceMode"] = EvidenceMode
+templates.env.globals["GLOSSARY"] = GLOSSARY
 
 
 @app.exception_handler(ArtifactError)
@@ -140,7 +145,7 @@ def _known_failure(request: Request, exc: Exception) -> Response:
     return _page(
         request,
         "error.html",
-        nav="overview",
+        nav="assessment",
         title="Cannot continue",
         message=str(exc),
     )
@@ -230,64 +235,87 @@ def _paginate(items: list, page: int) -> tuple[list, dict[str, Any]]:
     return window, meta
 
 
-# --- Overview ---------------------------------------------------------------
+# --- Assessment home --------------------------------------------------------
 
 
 @app.get("/", response_class=HTMLResponse)
-def overview(request: Request) -> Response:
-    ctx = context.workspace()
-    latest = ctx.latest
-
-    verdict_chart = charts.Chart(svg="", empty=True, summary="No assessment yet.")
-    evidence_chart = charts.Chart(svg="", empty=True, summary="No scan yet.")
-    applicability_chart = charts.Chart(svg="", empty=True, summary="No registry yet.")
-    trend = charts.Chart(svg="", empty=True, summary="")
-
-    if latest and latest.has_assessment:
-        verdict_chart = charts.doughnut(
-            charts.verdict_segments(latest.verdict_counts, run_id=latest.run_id),
-            center_label="controls",
-        )
-    if latest and latest.has_evidence:
-        evidence_chart = charts.hbars(
-            charts.evidence_segments(latest.evidence_status_counts, run_id=latest.run_id)
-        )
-    if ctx.registry.scannable:
-        try:
-            applicability_chart = charts.hbars(
-                charts.applicability_segments(load_approved().controls)
-            )
-        except (RegistryServiceError, ValueError):
-            pass
-
-    series_runs = runs_service.comparable_runs(ctx.runs)
-    if series_runs:
-        trend = charts.grouped_bars(
-            [r.run_id for r in series_runs],
-            [
-                charts.TrendSeries(
-                    verdict.value,
-                    charts.VERDICT_COLORS[verdict],
-                    [r.verdict_counts.get(verdict.value, 0) for r in series_runs],
-                )
-                for verdict in (
-                    Verdict.PASS,
-                    Verdict.FAIL,
-                    Verdict.INSUFFICIENT_EVIDENCE,
-                )
-            ],
-        )
-
+def assessment_home(request: Request) -> Response:
+    params = dict(request.query_params)
+    run_id = _resolve_run(params.get("run"), require_assessment=True)
+    view = get_compliance_provider().load(run_id) if run_id else None
+    unassessed = [r for r in runs_service.list_runs() if r.has_evidence and not r.has_assessment]
     return _page(
         request,
-        "overview.html",
-        nav="overview",
-        title="Overview",
-        verdict_chart=verdict_chart,
-        evidence_chart=evidence_chart,
-        applicability_chart=applicability_chart,
-        trend=trend,
-        trend_runs=series_runs,
+        "assessment_home.html",
+        nav="assessment",
+        title="Assessment",
+        stage="assessment",
+        view=view,
+        unassessed=unassessed,
+    )
+
+
+# --- Controls ---------------------------------------------------------------
+
+
+@app.get("/controls", response_class=HTMLResponse)
+def controls_page(request: Request) -> Response:
+    params = dict(request.query_params)
+    run_id = _resolve_run(params.get("run"), require_assessment=True)
+    view = get_compliance_provider().load(run_id) if run_id else None
+    status = params.get("status", "")
+    q = params.get("q", "").strip().lower()
+    page = _page_num(params)
+
+    controls = list(view.controls) if view else []
+    filtered = []
+    for control in controls:
+        if status and control.status.value != status:
+            continue
+        if q and q not in f"{control.control_id} {control.title}".lower():
+            continue
+        filtered.append(control)
+
+    window, pager = _paginate(filtered, page)
+    return _page(
+        request,
+        "controls.html",
+        nav="controls",
+        title="Controls",
+        stage="controls",
+        view=view,
+        controls=window,
+        pager=pager,
+        filters=params,
+    )
+
+
+# --- Findings ---------------------------------------------------------------
+
+
+@app.get("/findings", response_class=HTMLResponse)
+def findings_page(request: Request) -> Response:
+    params = dict(request.query_params)
+    run_id = _resolve_run(params.get("run"), require_assessment=True)
+    view = get_compliance_provider().load(run_id) if run_id else None
+    status = params.get("status", "")
+    page = _page_num(params)
+
+    findings = list(view.findings) if view else []
+    if status:
+        findings = [f for f in findings if f.status.value == status]
+
+    window, pager = _paginate(findings, page)
+    return _page(
+        request,
+        "findings.html",
+        nav="findings",
+        title="Findings",
+        stage="findings",
+        view=view,
+        findings=window,
+        pager=pager,
+        filters=params,
     )
 
 
@@ -424,11 +452,6 @@ def evidence_page(request: Request) -> Response:
         filtered.append(item)
 
     window, pager = _paginate(filtered, page)
-    chart = charts.Chart(svg="", empty=True, summary="No scan yet.")
-    if run:
-        chart = charts.hbars(
-            charts.evidence_segments(run.summary.by_status, run_id=run_id or "")
-        )
 
     return _page(
         request,
@@ -442,7 +465,6 @@ def evidence_page(request: Request) -> Response:
         matched=len(filtered),
         pager=pager,
         filters=params,
-        chart=chart,
         scenarios=context.scenarios(),
     )
 
@@ -473,81 +495,34 @@ def evidence_detail(request: Request, run_id: str, evidence_id: str) -> Response
     )
 
 
-# --- Assessment -------------------------------------------------------------
+# --- Assessment (alias → home) ----------------------------------------------
 
 
 @app.get("/assessment", response_class=HTMLResponse)
 def assessment_page(request: Request) -> Response:
-    params = dict(request.query_params)
-    run_id = _resolve_run(params.get("run"), require_assessment=True)
-    verdict = params.get("verdict", "")
-    review = params.get("review", "")
-    mode = params.get("mode", "")
-    q = params.get("q", "").strip().lower()
-    page = _page_num(params)
-
-    assessment = runs_service.load_assessment(run_id) if run_id else None
-    results = list(assessment.results) if assessment else []
-
-    filtered = []
-    for result in results:
-        if verdict and result.verdict.value != verdict:
-            continue
-        if review == "yes" and not result.registry_human_review_flag:
-            continue
-        if mode and result.evaluation_mode != mode:
-            continue
-        if q and q not in f"{result.control_id} {result.title}".lower():
-            continue
-        filtered.append(result)
-
-    window, pager = _paginate(filtered, page)
-    overview_run = runs_service.run_overview(run_id) if run_id else None
-    chart = charts.Chart(svg="", empty=True, summary="No assessment yet.")
-    if overview_run and overview_run.has_assessment:
-        chart = charts.doughnut(
-            charts.verdict_segments(overview_run.verdict_counts, run_id=run_id or ""),
-            center_label="controls",
-        )
-
-    unassessed = [r for r in runs_service.list_runs() if r.has_evidence and not r.has_assessment]
-
-    return _page(
-        request,
-        "assessment.html",
-        nav="assessment",
-        title="Assessment",
-        stage="assessment",
-        assessment=assessment,
-        run_id=run_id,
-        results=window,
-        matched=len(filtered),
-        pager=pager,
-        filters=params,
-        chart=chart,
-        unassessed=unassessed,
-    )
+    """Keep the old URL; the assessment home is now ``/``."""
+    qs = request.url.query
+    target = f"/?{qs}" if qs else "/"
+    return RedirectResponse(target, status_code=303)
 
 
 @app.get("/assessment/control/{control_id}", response_class=HTMLResponse)
 def assessment_control(request: Request, control_id: str) -> Response:
     run_id = _resolve_run(request.query_params.get("run"), require_assessment=True)
-    assessment = runs_service.load_assessment(run_id) if run_id else None
-    result = (
-        next((r for r in assessment.results if r.control_id == control_id), None)
-        if assessment
+    view = get_compliance_provider().load(run_id) if run_id else None
+    control = (
+        next((c for c in view.controls if c.control_id == control_id), None)
+        if view
         else None
     )
-    if result is None:
+    if control is None:
         return _page(
-            request, "error.html", nav="assessment", title="Control not found",
+            request, "error.html", nav="controls", title="Control not found",
             message=f"No assessed control '{control_id}' in run {run_id}.",
         )
 
-    evidence_run = runs_service.load_evidence(run_id) if run_id else None
-    evidence_by_id = (
-        {e.evidence_id: e for e in evidence_run.evidence} if evidence_run else {}
-    )
+    assets_by_id = {a.asset_id: a for a in (view.assets if view else [])}
+    assets = [assets_by_id[aid] for aid in control.asset_ids if aid in assets_by_id]
     remediation = runs_service.load_remediation(run_id) if run_id else None
     item = (
         next((i for i in remediation.items if i.finding_control_id == control_id), None)
@@ -558,14 +533,14 @@ def assessment_control(request: Request, control_id: str) -> Response:
     return _page(
         request,
         "assessment_control.html",
-        nav="assessment",
-        title=result.control_id,
-        stage="assessment",
-        assessment=assessment,
+        nav="controls",
+        title=control.control_id,
+        stage="controls",
         run_id=run_id,
-        result=result,
-        evidence_by_id=evidence_by_id,
+        control=control,
+        assets=assets,
         remediation_item=item,
+        view=view,
     )
 
 
@@ -576,30 +551,23 @@ def assessment_control(request: Request, control_id: str) -> Response:
 def remediation_page(request: Request) -> Response:
     params = dict(request.query_params)
     run_id = _resolve_run(params.get("run"), require_assessment=True)
-    tab = params.get("tab", ActionType.TECHNICAL_REMEDIATION.value)
-    if tab not in {a.value for a in ActionType}:
-        tab = ActionType.TECHNICAL_REMEDIATION.value
+    view = get_compliance_provider().load(run_id) if run_id else None
 
     remediation = runs_service.load_remediation(run_id) if run_id else None
     verification = runs_service.load_verification(run_id) if run_id else None
     if verification is None and remediation is not None:
         verification = remediation.verification
 
-    items = [i for i in remediation.items if i.action_type.value == tab] if remediation else []
-    counts = remediation.summary.by_action_type if remediation else {}
-
     return _page(
         request,
         "remediation.html",
         nav="remediation",
-        title="Remediation & Verify",
+        title="Remediation",
         stage="remediation",
+        view=view,
         remediation=remediation,
         verification=verification,
         run_id=run_id,
-        items=items,
-        tab=tab,
-        counts=counts,
         filters=params,
         previous_run=runs_service.previous_assessed_run(run_id) if run_id else None,
         assessed_runs=[r for r in runs_service.list_runs() if r.has_assessment],
@@ -630,17 +598,8 @@ def run_report(request: Request, run_id: str) -> Response:
             message=f"No run '{run_id}'.",
         )
 
-    assessment = runs_service.load_assessment(run_id)
-    remediation = runs_service.load_remediation(run_id)
-    verification = runs_service.load_verification(run_id)
-    if verification is None and remediation is not None:
-        verification = remediation.verification
-    evidence = runs_service.load_evidence(run_id)
-
-    by_verdict: dict[str, list] = {}
-    if assessment:
-        for result in assessment.results:
-            by_verdict.setdefault(result.verdict.value, []).append(result)
+    view = get_compliance_provider().load(run_id)
+    overview = runs_service.run_overview(run_id)
 
     return _page(
         request,
@@ -648,12 +607,8 @@ def run_report(request: Request, run_id: str) -> Response:
         nav="reports",
         title=f"Report {run_id}",
         run_id=run_id,
-        overview=runs_service.run_overview(run_id),
-        assessment=assessment,
-        remediation=remediation,
-        verification=verification,
-        evidence=evidence,
-        by_verdict=by_verdict,
+        overview=overview,
+        view=view,
         has_html_report=runs_service.report_path(run_id).exists(),
         has_final_report=runs_service.final_report_path(run_id).exists(),
     )
@@ -870,3 +825,94 @@ def action_rescan_verify(
         return _redirect(f"/jobs/{job.job_id}")
 
     return _action(request, run, "/remediation")
+
+
+@app.post("/actions/lifecycle/apply-remediation")
+async def action_apply_remediation(
+    request: Request,
+    run_id: str = Form(...),
+    control_id: str = Form(...),
+) -> Response:
+    """Mock apply → verify → PASS. Does not mutate assessment.json."""
+
+    def run() -> RedirectResponse:
+        apply_remediation(run_id.strip(), control_id.strip())
+        try:
+            refresh_reports(run_id.strip())
+        except Exception:
+            pass
+        return _redirect(
+            f"/assessment/control/{control_id.strip()}?run={run_id.strip()}",
+            "Mock remediation applied and verified.",
+            "success",
+        )
+
+    try:
+        _guard_origin(request)
+        return run()
+    except LifecycleError as exc:
+        return _redirect(
+            f"/assessment/control/{control_id.strip()}?run={run_id.strip()}",
+            str(exc),
+            "error",
+        )
+    except (WorkflowError, RegistryServiceError) as exc:
+        return _redirect("/remediation", str(exc), "error")
+
+
+@app.post("/actions/lifecycle/analyse-evidence")
+async def action_analyse_evidence(
+    request: Request,
+    run_id: str = Form(...),
+    control_id: str = Form(...),
+    description: str = Form(""),
+    comments: str = Form(""),
+) -> Response:
+    """Submit human evidence and run the mock EvidenceAnalyzer."""
+    form = await request.form()
+    files: list[tuple[str, bytes, str]] = []
+    for key, value in form.multi_items():
+        if key != "attachments":
+            continue
+        if not hasattr(value, "read") or not getattr(value, "filename", None):
+            continue
+        content = await value.read()
+        files.append(
+            (
+                value.filename,
+                content,
+                getattr(value, "content_type", None) or "application/octet-stream",
+            )
+        )
+
+    def run() -> RedirectResponse:
+        entry = analyse_evidence(
+            run_id.strip(),
+            control_id.strip(),
+            description=description,
+            comments=comments,
+            files=files,
+        )
+        try:
+            refresh_reports(run_id.strip())
+        except Exception:
+            pass
+        decision = ""
+        if entry.last_analysis:
+            decision = entry.last_analysis.resolve_final().value
+        msg = f"Evidence analysed: {decision}." if decision else "Evidence analysed."
+        return _redirect(
+            f"/assessment/control/{control_id.strip()}?run={run_id.strip()}",
+            msg,
+            "success",
+        )
+
+    try:
+        _guard_origin(request)
+        return run()
+    except LifecycleError as exc:
+        return _redirect(
+            f"/assessment/control/{control_id.strip()}?run={run_id.strip()}",
+            str(exc),
+            "error",
+        )

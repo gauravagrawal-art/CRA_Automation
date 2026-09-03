@@ -235,6 +235,7 @@ h2.section { font-size: 1.05rem; margin: 1.6rem 0 .7rem; }
 /* --- tiles ---------------------------------------------------------------- */
 
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: .6rem; margin: 0 0 1rem; padding: 0; list-style: none; }
+.tiles.compact { margin-top: .75rem; }
 .tile {
   display: block;
   background: var(--panel);
@@ -256,6 +257,7 @@ a.tile:hover { text-decoration: none; border-color: var(--accent); box-shadow: 0
 .tile.partial { border-top-color: var(--partial); } .tile.partial .n { color: var(--partial); }
 .tile.insufficient { border-top-color: var(--insufficient); }
 .tile.review { border-top-color: var(--review); } .tile.review .n { color: var(--review); }
+.tile.rem-pending { border-top-color: var(--partial); } .tile.rem-pending .n { color: var(--partial); }
 .tile.na { border-top-color: var(--na); }
 
 /* --- badges --------------------------------------------------------------- */
@@ -552,6 +554,36 @@ blockquote.excerpt {
 .pager .spacer { margin-left: auto; }
 
 .empty { text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: .9rem; }
+
+.status-hero .overall {
+  font-size: 1.15rem;
+  margin: .4rem 0 0;
+}
+.status-hero .overall.pass { color: var(--pass); }
+.status-hero .overall.fail { color: var(--fail); }
+.status-hero .overall.review { color: var(--review); }
+.bullets { margin: .75rem 0 0; padding-left: 1.2rem; color: var(--muted); font-size: .9rem; }
+.bullets li { margin: .2rem 0; }
+ul.plain { margin: .25rem 0 0; padding-left: 1.1rem; }
+
+.badge.REVIEW { background: var(--review); }
+.badge.REMEDIATION_PENDING { background: var(--partial); }
+.badge.INSUFFICIENT_EVIDENCE { background: var(--insufficient); }
+.badge.PENDING, .badge.IN_PROGRESS, .badge.APPLIED, .badge.VERIFYING { background: var(--partial); }
+.badge.VERIFIED { background: var(--pass); }
+.badge.FAILED { background: var(--fail); }
+
+textarea.input, input.input {
+  width: 100%;
+  max-width: 40rem;
+  padding: .5rem .65rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+}
+.badge.NOT_APPLICABLE { background: var(--na); }
+.badge.OPEN { background: var(--partial); }
+.badge.VERIFIED_CLOSED { background: var(--pass); }
 
 footer.foot { color: var(--muted); font-size: .76rem; padding: 1.5rem 0 0; max-width: 78ch; }
 

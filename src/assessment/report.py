@@ -345,20 +345,55 @@ def _human_review(assessment: Assessment) -> str:
     )
 
 
-def render_html(assessment: Assessment) -> str:
+def render_html(assessment: Assessment, *, assessments_dir=None) -> str:
     """Render the assessment as one self-contained HTML document."""
-    body = "".join(
-        [
-            _header(assessment),
-            _summary(assessment),
-            _control_table(assessment),
-            _human_review(assessment),
-            _limitations(assessment),
-            _details(assessment),
-            f"<footer>{_e(REPORT_TITLE)} — run {_e(assessment.metadata.run_id)} — "
-            f"generated {_e(assessment.metadata.generated_at)}. "
-            "Verdicts are produced by the deterministic rule engine.</footer>",
-        ]
+    from pathlib import Path
+
+    from src.compliance.mock_provider import MockComplianceProvider
+    from src.compliance.report import concise_body
+    from src.lifecycle.store import load_lifecycle
+    from src.services import runs_service
+
+    evidence = None
+    try:
+        evidence = runs_service.load_evidence(assessment.metadata.run_id)
+    except Exception:
+        evidence = None
+
+    lifecycle = None
+    try:
+        if assessments_dir is not None:
+            lifecycle = load_lifecycle(assessment.metadata.run_id, Path(assessments_dir))
+        else:
+            lifecycle = runs_service.load_lifecycle(assessment.metadata.run_id)
+    except Exception:
+        lifecycle = None
+
+    remediation = None
+    try:
+        remediation = runs_service.load_remediation(assessment.metadata.run_id)
+    except Exception:
+        remediation = None
+
+    view = MockComplianceProvider().from_artifacts(
+        assessment=assessment,
+        evidence=evidence,
+        remediation=remediation,
+        lifecycle=lifecycle,
+    )
+    mock = ""
+    if assessment.metadata.provider == "mock":
+        mock = (
+            "<div class='disclaimer'><strong>SYNTHETIC / MOCK ASSESSMENT DATA</strong>"
+            "Findings describe synthetic fixture data.</div>"
+        )
+    body = (
+        f"<h1>{_e(REPORT_TITLE)}</h1>"
+        f"<p class='lede'>Technical readiness assessment for "
+        f"{_e(assessment.metadata.target_id)}.</p>"
+        f"<div class='disclaimer'><strong>Scope</strong>{_e(DISCLAIMER)}</div>"
+        f"{mock}"
+        f"{concise_body(view, include_remediation=False)}"
     )
     return (
         "<!DOCTYPE html>\n"

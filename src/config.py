@@ -158,3 +158,9 @@ SUPPORTED_ASSESSMENT_SCHEMA_VERSIONS = {"3.0"}
 
 # Flow 4 recommends; a system owner acts. No remediation item is ever executed.
 REMEDIATION_OWNER = "SYSTEM_OWNER"
+
+# --- Lifecycle overlay (mock remediation execution + human evidence review) ---
+
+LIFECYCLE_SCHEMA_VERSION = "1.0"
+# Soft cap for human-uploaded evidence attachments (bytes per file).
+HUMAN_EVIDENCE_MAX_BYTES = 1_048_576

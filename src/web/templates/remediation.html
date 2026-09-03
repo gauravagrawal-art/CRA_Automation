@@ -4,25 +4,19 @@
 
 {% if not run_id %}
 <div class="panel">
-  <p class="empty">
-    No assessed run yet. Collect evidence and run an assessment first, then come back here
-    for recommended actions.
-  </p>
-  <p><a class="btn" href="/assessment">Open Assessment</a></p>
+  <p class="empty">No assessed run yet. Complete an <a href="/">Assessment</a> first.</p>
 </div>
 {% else %}
 
 <div class="panel">
   <div class="panel-head">
-    <h2>Remediation for {{ run_id }}</h2>
-    <div class="right">
-      {{ m.run_picker(run_id, assessed_runs, '/remediation', filters) }}
-    </div>
+    <h2>Remediation</h2>
+    <div class="right">{{ m.run_picker(run_id, assessed_runs, '/remediation', filters) }}</div>
   </div>
   <p class="lede">
-    Recommendations are copied from the approved registry. Nothing is executed and the target is
-    never modified. A finding closes only when a later evidence-backed assessment returns PASS for
-    the same control, on the same target, under the same approved baseline.
+    Each item identifies the control, affected asset, issue, and recommended action.
+    Mock <strong>Apply Remediation</strong> on a control page simulates execution and verification;
+    the advisory Flow 4 list still does not change the target.
   </p>
 
   {% if not remediation %}
@@ -31,52 +25,73 @@
     {% if previous_run %}<input type="hidden" name="previous_run" value="{{ previous_run }}">{% endif %}
     <button class="btn primary" type="submit" data-busy-label="Composing…">Compose remediation</button>
   </form>
-  <p class="small muted">
-    This groups assessed findings into technical fixes, evidence gaps and human decisions.
-    {% if previous_run %}It will also compare this run with {{ previous_run }}.{% endif %}
-  </p>
   {% else %}
   <dl class="meta">
     <dt>Items</dt><dd>{{ remediation.summary.items_total }}</dd>
     <dt>Open</dt><dd>{{ remediation.summary.by_status.get('OPEN', 0) }}</dd>
     <dt>Verified closed</dt><dd>{{ remediation.summary.by_status.get('VERIFIED_CLOSED', 0) }}</dd>
-    <dt>Owner</dt><dd>System owner — this application does not apply changes</dd>
   </dl>
   {% endif %}
 </div>
 
-{% if remediation %}
-<ul class="tiles">
-  <li>
-    <a class="tile fail" href="/remediation?run={{ run_id }}&tab=TECHNICAL_REMEDIATION">
-      <span class="k">Technical remediation</span>
-      <span class="n">{{ counts.get('TECHNICAL_REMEDIATION', 0) }}</span>
-    </a>
-  </li>
-  <li>
-    <a class="tile insufficient" href="/remediation?run={{ run_id }}&tab=EVIDENCE_RESOLUTION">
-      <span class="k">Evidence gaps</span>
-      <span class="n">{{ counts.get('EVIDENCE_RESOLUTION', 0) }}</span>
-      <span class="sub">Not a security failure</span>
-    </a>
-  </li>
-  <li>
-    <a class="tile review" href="/remediation?run={{ run_id }}&tab=HUMAN_REVIEW">
-      <span class="k">Human review</span>
-      <span class="n">{{ counts.get('HUMAN_REVIEW', 0) }}</span>
-    </a>
-  </li>
-</ul>
+{% if view and view.remediations %}
+{% for item in view.remediations %}
+<article class="panel rem-card">
+  <div class="panel-head">
+    <h2>
+      <a href="/assessment/control/{{ item.control_id }}?run={{ run_id }}">{{ item.control_id }}</a>
+      <span class="small muted">{{ item.control_title }}</span>
+    </h2>
+    <div class="right">
+      <span class="chip">{{ item.severity.value if item.severity.value != 'NONE' else item.action_type }}</span>
+      {{ m.badge(item.status) }}
+    </div>
+  </div>
+  <dl class="meta">
+    <dt>Asset</dt><dd>{{ item.asset_name }} <span class="mono small">({{ item.asset_id }})</span></dd>
+  </dl>
+  <div class="field">
+    <div class="label">Issue</div>
+    <p>{{ item.issue or '—' }}</p>
+  </div>
+  <div class="field">
+    <div class="label">Recommended action</div>
+    <p>{{ item.recommended_action or '—' }}</p>
+  </div>
+  <div class="field">
+    <div class="label">Verification</div>
+    <p>{{ item.verification or 'Rescan and confirm PASS for this control.' }}</p>
+  </div>
+  {% if item.status in ('OPEN', 'PENDING', 'FAILED') or item.status == 'OPEN' %}
+  {% set ctrl = view.controls | selectattr('control_id', 'equalto', item.control_id) | first %}
+  {% if ctrl and ctrl.can_apply_remediation %}
+  <form method="post" action="/actions/lifecycle/apply-remediation" class="inline"
+        data-confirm="Apply mock remediation for {{ item.control_id }}?">
+    <input type="hidden" name="run_id" value="{{ run_id }}">
+    <input type="hidden" name="control_id" value="{{ item.control_id }}">
+    <button class="btn small primary" type="submit" data-busy-label="Applying…">Apply Remediation</button>
+  </form>
+  {% endif %}
+  {% endif %}
+  {% if item.evidence_ids %}
+  <p class="small">
+    Evidence:
+    {% for eid in item.evidence_ids %}
+      <a class="mono" href="/evidence/{{ run_id }}/{{ eid }}">{{ eid }}</a>{% if not loop.last %}, {% endif %}
+    {% endfor %}
+  </p>
+  {% endif %}
+</article>
+{% endfor %}
+{% elif remediation %}
+<div class="panel"><p class="empty">No remediation items in the compliance view.</p></div>
 {% endif %}
 
 <section class="panel">
   <h2>Re-scan &amp; verify</h2>
-  <p class="lede">
-    After a change has been applied on the target <em>outside</em> this application, collect
-    evidence again, re-assess, and compare. Only a new PASS closes a finding.
-  </p>
+  <p class="lede">After applying a fix outside this app, re-scan and compare. Only a new PASS closes a finding.</p>
   <form method="post" action="/actions/rescan-verify" class="filters"
-        data-confirm="Start a new read-only scan and verify against the selected previous run?&#10;&#10;Mode: Read-only&#10;Target modification: Disabled&#10;Registry: v{{ ctx.registry.latest_version }}">
+        data-confirm="Start a new read-only scan and verify against the selected previous run?">
     <div class="field-inline">
       <label for="target">Target</label>
       <select id="target" name="target" required>
@@ -89,7 +104,7 @@
       </select>
     </div>
     <div class="field-inline">
-      <label for="previous_run">Previous run to close against</label>
+      <label for="previous_run">Previous run</label>
       <select id="previous_run" name="previous_run" required>
         {% for r in assessed_runs %}
         <option value="{{ r.run_id }}" {% if r.run_id == previous_run or (not previous_run and r.run_id == run_id) %}selected{% endif %}>
@@ -110,164 +125,18 @@
       Re-scan &amp; verify
     </button>
   </form>
-  <p class="small muted">Chains evidence collection, assessment and verification. The target is not written to.</p>
 </section>
-
-{% if assessed_runs | length >= 2 %}
-<details class="panel">
-  <summary>Compare two existing assessments</summary>
-  <div class="body">
-    <p class="lede">Use this when both runs are already assessed and you only want the closure decision.</p>
-    <form method="post" action="/actions/verification/run" class="filters">
-      <div class="field-inline">
-        <label for="prev">Previous run</label>
-        <select id="prev" name="previous_run" required>
-          {% for r in assessed_runs %}
-          <option value="{{ r.run_id }}" {% if r.run_id == previous_run %}selected{% endif %}>{{ r.run_id }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="field-inline">
-        <label for="new">New run</label>
-        <select id="new" name="new_run" required>
-          {% for r in assessed_runs %}
-          <option value="{{ r.run_id }}" {% if r.run_id == run_id %}selected{% endif %}>{{ r.run_id }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <button class="btn" type="submit" data-busy-label="Comparing…">Verify closure</button>
-    </form>
-  </div>
-</details>
-{% endif %}
 
 {% if verification %}
 <section class="panel">
-  <div class="panel-head">
-    <h2>Verification status</h2>
-    <div class="right">
-      {% if verification.baseline_comparable %}
-        <span class="chip on">Comparable baseline</span>
-      {% else %}
-        <span class="badge VERIFICATION_BLOCKED" title="{{ explain('VERIFICATION_BLOCKED') }}">VERIFICATION BLOCKED</span>
-      {% endif %}
-    </div>
-  </div>
-  <p class="lede">
-    {{ verification.metadata.previous_run_id }} → {{ verification.metadata.new_run_id }}
-    on {{ verification.metadata.new_target_id }}.
-  </p>
-  {% if not verification.baseline_comparable %}
-  <div class="notice warn">
-    {{ verification.blocked_reason_code.value if verification.blocked_reason_code else 'VERIFICATION_BLOCKED' }}:
-    the assessments are not the same baseline, so nothing can be closed.
-    {{ explain(verification.blocked_reason_code.value if verification.blocked_reason_code else 'VERIFICATION_BLOCKED') }}
-  </div>
-  {% endif %}
-  <ul class="tiles">
-    <li class="tile accent"><span class="k">Compared</span><span class="n">{{ verification.summary.findings_compared }}</span></li>
-    <li class="tile pass"><span class="k">Verified closed</span><span class="n">{{ verification.summary.verified_closed }}</span></li>
+  <h2>Verification</h2>
+  <p class="lede">{{ verification.metadata.previous_run_id }} → {{ verification.metadata.new_run_id }}</p>
+  <ul class="tiles compact">
+    <li class="tile pass"><span class="k">Closed</span><span class="n">{{ verification.summary.verified_closed }}</span></li>
     <li class="tile fail"><span class="k">Still open</span><span class="n">{{ verification.summary.still_open }}</span></li>
     <li class="tile review"><span class="k">Blocked</span><span class="n">{{ verification.summary.blocked }}</span></li>
   </ul>
 </section>
-{% endif %}
-
-{% if remediation %}
-<nav class="tabs" aria-label="Remediation categories">
-  {% for action, label in [
-      ('TECHNICAL_REMEDIATION', 'Technical remediation'),
-      ('EVIDENCE_RESOLUTION', 'Evidence gaps'),
-      ('HUMAN_REVIEW', 'Human review')] %}
-  <a href="/remediation?run={{ run_id }}&tab={{ action }}"
-     {% if tab == action %}aria-current="page"{% endif %}>
-    {{ label }} <span class="n">{{ counts.get(action, 0) }}</span>
-  </a>
-  {% endfor %}
-</nav>
-
-<p class="lede">{{ explain(tab) }}</p>
-
-{% if not items %}
-<div class="panel"><p class="empty">Nothing in this category for {{ run_id }}.</p></div>
-{% endif %}
-
-{% for item in items %}
-<article class="panel rem-card">
-  <div class="panel-head">
-    <h2>
-      <a href="/assessment/control/{{ item.finding_control_id }}?run={{ run_id }}">{{ item.finding_control_id }}</a>
-      <span class="small muted">{{ item.finding_title.split(':', 1)[1] | trim if ':' in item.finding_title else item.finding_title }}</span>
-    </h2>
-    <div class="right">
-      {{ m.badge(item.finding_verdict) }}
-      {{ m.badge(item.status) }}
-    </div>
-  </div>
-
-  {% if item.observed_state %}
-  <div class="field">
-    <div class="label">Observed state</div>
-    <p class="small">{{ item.observed_state }}</p>
-  </div>
-  {% endif %}
-
-  {% if item.recommendation %}
-  <div class="field">
-    <div class="label">Recommended action</div>
-    <p>{{ item.recommendation }}</p>
-    <p class="small muted">Copied verbatim from the approved registry. Nothing is executed.</p>
-  </div>
-  {% endif %}
-
-  <div class="field">
-    <div class="label">Why this recommendation exists</div>
-    <p class="small">{{ item.reason }}</p>
-    {% if item.reason_code %}
-    <p class="small muted" title="{{ explain(item.reason_code.value) }}">{{ item.reason_code.value }}</p>
-    {% endif %}
-  </div>
-
-  {% if item.failed_rule_refs %}
-  <div class="field">
-    <div class="label">Approved rules that did not match</div>
-    <ul class="small mono">{% for r in item.failed_rule_refs %}<li>{{ r }}</li>{% endfor %}</ul>
-  </div>
-  {% endif %}
-
-  {% if item.missing_evidence_keys %}
-  <div class="field">
-    <div class="label">Evidence that could not be collected</div>
-    <ul class="small mono">{% for k in item.missing_evidence_keys %}<li>{{ k }}</li>{% endfor %}</ul>
-  </div>
-  {% endif %}
-
-  {% if item.verification %}
-  <div class="field">
-    <div class="label">Verification requirement</div>
-    <p class="small">
-      A later assessment must return <strong>{{ item.verification.required_post_verdict }}</strong>
-      for this control on the same target under registry
-      <span class="mono">{{ item.verification.registry_hash | short(16) }}</span>.
-    </p>
-    {% if item.verification.evidence_keys %}
-    <p class="small muted">Evidence that will be recollected:
-      <span class="mono">{{ item.verification.evidence_keys | join(', ') }}</span>
-    </p>
-    {% endif %}
-  </div>
-  {% endif %}
-
-  {% if item.evidence_ids %}
-  <p class="small">
-    Evidence:
-    {% for eid in item.evidence_ids %}
-      <a class="mono" href="/evidence/{{ run_id }}/{{ eid }}">{{ eid }}</a>{% if not loop.last %}, {% endif %}
-    {% endfor %}
-  </p>
-  {% endif %}
-</article>
-{% endfor %}
 {% endif %}
 
 {% endif %}

@@ -83,6 +83,19 @@ GLOSSARY: dict[str, str] = {
         "The approved registry changed between the runs. A control may be reassessed "
         "under the new baseline, but that is not closure under the old one."
     ),
+    "REVIEW": (
+        "Human review is required. This is not a FAIL; submit evidence for analysis."
+    ),
+    "REMEDIATION_PENDING": (
+        "A mock remediation is in progress or awaiting verification. The control has "
+        "not passed yet."
+    ),
+    "PENDING": "Remediation is recommended but not yet applied.",
+    "IN_PROGRESS": "Mock remediation execution has started.",
+    "APPLIED": "Mock remediation was applied; verification has not finished.",
+    "VERIFYING": "Mock verification / re-evaluation is running.",
+    "VERIFIED": "Mock verification succeeded; the control may show PASS.",
+    "FAILED": "Mock remediation or verification did not succeed.",
     # Modes and context
     "DETERMINISTIC": (
         "The verdict comes from the rule engine evaluating the approved rules. No "

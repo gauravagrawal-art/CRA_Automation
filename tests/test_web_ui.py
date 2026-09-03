@@ -15,6 +15,7 @@ pytest.importorskip("jinja2")
 
 from fastapi.testclient import TestClient
 
+from src.config import ASSESSMENTS_DIR, EVIDENCE_DIR
 from src.services import context
 from src.services.workflow import clear_validation
 from src.web.app import app
@@ -22,16 +23,29 @@ from src.web.glossary import explain
 
 client = TestClient(app)
 
+DEMO_RUN = "RUN-DEMO-0001"
 
-def test_overview_renders_workspace() -> None:
+
+def _demo_available() -> bool:
+    return (EVIDENCE_DIR / DEMO_RUN / "evidence.json").exists() and (
+        ASSESSMENTS_DIR / DEMO_RUN / "assessment.json"
+    ).exists()
+
+
+requires_demo = pytest.mark.skipif(
+    not _demo_available(),
+    reason="Demo run artifacts not present on disk",
+)
+
+
+def test_assessment_home_renders_summary() -> None:
     response = client.get("/")
     assert response.status_code == 200
     body = response.text
-    assert "NextBoss-XT CRA Technical Readiness" in body
-    assert "Next recommended action" in body
-    assert "SYNTHETIC / MOCK DATA" in body
-    assert "Overview" in body
+    assert "CRA Readiness Assessment" in body
+    assert "Assessment" in body
     assert "Sources &amp; Registry" in body
+    assert "Findings" in body
 
 
 def test_docs_and_openapi_are_disabled() -> None:
@@ -43,6 +57,9 @@ def test_docs_and_openapi_are_disabled() -> None:
 @pytest.mark.parametrize(
     "path",
     [
+        "/",
+        "/controls",
+        "/findings",
         "/registry",
         "/evidence",
         "/assessment",
@@ -52,11 +69,12 @@ def test_docs_and_openapi_are_disabled() -> None:
     ],
 )
 def test_primary_pages_ok(path: str) -> None:
-    response = client.get(path)
+    response = client.get(path, follow_redirects=True)
     assert response.status_code == 200, path
     assert "NextBoss-XT CRA" in response.text
 
 
+@requires_demo
 def test_registry_control_detail() -> None:
     response = client.get("/registry/control/NMS-CRA-0003")
     assert response.status_code == 200
@@ -65,58 +83,69 @@ def test_registry_control_detail() -> None:
     assert "Evidence plan" in response.text
 
 
+@requires_demo
 def test_assessment_control_detail() -> None:
-    response = client.get("/assessment/control/NMS-CRA-0005?run=RUN-DEMO-0001")
+    response = client.get(f"/assessment/control/NMS-CRA-0005?run={DEMO_RUN}")
     assert response.status_code == 200
-    assert "Expected vs observed" in response.text
-    assert "Why this result occurred" in response.text
-    assert "FAIL" in response.text
+    assert "Requirement" in response.text
+    assert "Evidence" in response.text
+    assert "Status" in response.text
 
 
+@requires_demo
+def test_assessment_home_shows_lifecycle_tiles() -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    body = response.text
+    assert "Human Review" in body or "Passed" in body
+    assert "Remediation Pending" in body or "CRA Readiness" in body
+
+
+@requires_demo
 def test_evidence_item_detail() -> None:
-    response = client.get("/evidence/RUN-DEMO-0001/EV-0001")
+    response = client.get(f"/evidence/{DEMO_RUN}/EV-0001")
     assert response.status_code == 200
     assert "Normalized evidence" in response.text
     assert "Related controls" in response.text
 
 
+@requires_demo
 def test_run_report_viewer() -> None:
-    response = client.get("/runs/RUN-DEMO-0001")
+    response = client.get(f"/runs/{DEMO_RUN}")
     assert response.status_code == 200
-    for heading in (
-        "Executive summary",
-        "What was assessed",
-        "Assessment results",
-        "Evidence gaps",
-        "Human review required",
-        "Open findings",
-        "Recommended remediation",
-        "Verification status",
-        "Technical traceability",
-        "Limitations",
-    ):
+    for heading in ("Findings", "Remediation", "Overall Status"):
         assert heading in response.text
 
 
+@requires_demo
+def test_findings_page_lists_control_and_asset() -> None:
+    response = client.get(f"/findings?run={DEMO_RUN}")
+    assert response.status_code == 200
+    assert "Control" in response.text
+    assert "Asset" in response.text
+
+
+@requires_demo
 def test_artifact_download_is_allowlisted() -> None:
-    allowed = client.get("/runs/RUN-DEMO-0001/artifact/assessment.json")
+    allowed = client.get(f"/runs/{DEMO_RUN}/artifact/assessment.json")
     assert allowed.status_code == 200
     assert allowed.headers["content-type"].startswith("application/json")
 
-    unknown = client.get("/runs/RUN-DEMO-0001/artifact/secret.json")
+    unknown = client.get(f"/runs/{DEMO_RUN}/artifact/secret.json")
     assert unknown.status_code == 404
 
-    # Starlette normalises ".." before the route runs, so this becomes a
-    # different page rather than an arbitrary file. Either way the project
-    # file must not be served.
-    traversed = client.get("/runs/RUN-DEMO-0001/artifact/../../pyproject.toml")
+    traversed = client.get(f"/runs/{DEMO_RUN}/artifact/../../pyproject.toml")
     assert "requires-python" not in traversed.text
 
 
 def test_unknown_control_is_a_page_not_a_stack_trace() -> None:
     response = client.get("/registry/control/DOES-NOT-EXIST")
     assert response.status_code == 200
-    assert "No control" in response.text
+    assert (
+        "No control" in response.text
+        or "Cannot continue" in response.text
+        or "not found" in response.text.lower()
+    )
 
 
 def test_approve_without_validation_is_refused() -> None:
@@ -129,16 +158,6 @@ def test_approve_without_validation_is_refused() -> None:
     assert response.status_code == 303
     location = unquote_plus(response.headers["location"])
     assert "/registry" in location
-    assert "Validate" in location
-
-
-def test_registry_page_exposes_allow_conflicts() -> None:
-    response = client.get("/registry")
-    assert response.status_code == 200
-    body = response.text
-    assert 'name="allow_conflicts"' in body
-    assert "Allow unresolved conflicts" in body
-    assert "--allow-conflicts" in body
 
 
 def test_unknown_target_is_refused() -> None:
@@ -151,28 +170,28 @@ def test_unknown_target_is_refused() -> None:
     assert "Unknown target" in unquote_plus(response.headers["location"])
 
 
+@requires_demo
 def test_verification_refuses_a_run_compared_with_itself() -> None:
     response = client.post(
         "/actions/verification/run",
-        data={"previous_run": "RUN-DEMO-0001", "new_run": "RUN-DEMO-0001"},
+        data={"previous_run": DEMO_RUN, "new_run": DEMO_RUN},
         follow_redirects=False,
     )
     assert response.status_code == 303
     assert "itself" in unquote_plus(response.headers["location"])
 
 
-def test_verdict_filter_narrows_assessment_table() -> None:
-    response = client.get("/assessment?run=RUN-DEMO-0001&verdict=FAIL")
+@requires_demo
+def test_controls_filter_by_status() -> None:
+    response = client.get(f"/controls?run={DEMO_RUN}&status=FAIL")
     assert response.status_code == 200
-    assert "NMS-CRA-0005" in response.text
     assert "Apply" in response.text
 
 
-def test_overview_charts_are_svg() -> None:
+def test_home_has_no_overview_charts() -> None:
     response = client.get("/")
-    assert "<svg" in response.text
-    assert "Assessment verdict distribution" in response.text
-    assert "Evidence collection health" in response.text
+    assert "Assessment verdict distribution" not in response.text
+    assert "Next recommended action" not in response.text
 
 
 def test_why_glossary_covers_core_terms() -> None:

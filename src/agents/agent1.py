@@ -372,6 +372,32 @@ def _etsi_refs_for_point(key: str, crosswalk: list[EtsiClauseCrosswalk]) -> list
     return refs
 
 
+def _remediation_recommendation(
+    key: str,
+    evidence: list[EvidencePlanItem],
+    assertion_refs: list[str],
+) -> str:
+    """Concise actionable recommendation for the control's technical area."""
+    haystack = " ".join(
+        [key, *assertion_refs, *(e.evidence_key for e in evidence), *(e.mcp_tool or "" for e in evidence)]
+    ).lower()
+    if "tls" in haystack or "certificate" in haystack:
+        return "Disable TLS 1.0 and TLS 1.1. Allow TLS 1.2 or TLS 1.3 only."
+    if "ssh" in haystack or "sshd" in haystack:
+        return "Harden SSH: disable root login and empty passwords, then reload sshd."
+    if "postgres" in haystack or "database" in haystack or "5432" in haystack:
+        return "Restrict database listeners to approved interfaces and require authentication."
+    if "firewall" in haystack:
+        return "Limit inbound exposure to approved management interfaces only."
+    if "user" in haystack or "account" in haystack or "password" in haystack:
+        return "Disable default accounts and enforce approved authentication controls."
+    if "package" in haystack or "patch" in haystack:
+        return "Apply approved security updates and remove unnecessary packages."
+    if any(e.mode == EvidenceMode.DOCUMENTARY_OR_HUMAN for e in evidence):
+        return "Document the required process evidence and submit for human review."
+    return f"Align configuration with CRA {key} and reassess."
+
+
 def _derive_control(
     idx: int,
     req: RequirementEntry,
@@ -440,10 +466,7 @@ def _derive_control(
         assertion_refs=assertion_refs,
         evaluation=evaluation,
         remediation_seed=RemediationSeed(
-            recommendation=(
-                f"Review and align NextBoss-XT configuration/processes with CRA {key}. "
-                "Apply advisory fixes outside this POC."
-            ),
+            recommendation=_remediation_recommendation(key, evidence, assertion_refs),
             verification_evidence_keys=[e.evidence_key for e in evidence],
         ),
         human_review_required=(

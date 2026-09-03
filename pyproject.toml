@@ -35,6 +35,8 @@ include = ["src*"]
 
 [tool.setuptools.package-data]
 "src.web" = ["templates/*.html", "templates/**/*.html", "static/*"]
+"src.compliance" = ["fixtures/*.json"]
+"src.mcp.providers" = ["fixtures/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

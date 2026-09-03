@@ -1,0 +1,88 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block content %}
+
+{% if unassessed %}
+<div class="panel">
+  <h2>Evidence waiting to be assessed</h2>
+  {% for r in unassessed %}
+  <form method="post" action="/actions/assessment/run" class="inline" style="margin-bottom:.4rem">
+    <input type="hidden" name="run_id" value="{{ r.run_id }}">
+    <span class="mono small">{{ r.run_id }}</span>
+    <span class="small muted">{{ r.target_id }}</span>
+    <button class="btn small primary" type="submit" data-busy-label="Assessing…">Run assessment</button>
+  </form>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if not view or view.summary.overall_status.value == 'NOT ASSESSED' %}
+<div class="panel">
+  <p class="empty">
+    No assessment yet.
+    {% if not ctx.registry.scannable %}
+      Approve a registry under <a href="/registry">Setup</a>, then
+    {% endif %}
+    collect evidence on the <a href="/evidence">Evidence</a> page.
+  </p>
+</div>
+{% else %}
+
+{% set s = view.summary %}
+<section class="panel status-hero">
+  <div class="panel-head">
+    <h2>CRA Readiness Assessment</h2>
+    <div class="right">
+      {{ m.run_picker(view.run_id, ctx.runs | selectattr('has_assessment') | list, '/', {}) }}
+      <a class="btn small" href="/runs/{{ view.run_id }}">Full report</a>
+    </div>
+  </div>
+  <p class="overall {{ 'fail' if 'ATTENTION' in s.overall_status.value else ('review' if 'REVIEW' in s.overall_status.value else 'pass') }}">
+    Overall Status: <strong>{{ s.overall_status.value }}</strong>
+  </p>
+  <ul class="tiles compact">
+    <li class="tile accent"><span class="k">Assets</span><span class="n">{{ s.assets_assessed }}</span></li>
+    <li class="tile accent"><span class="k">Controls</span><span class="n">{{ s.controls_assessed }}</span></li>
+    <li class="tile pass"><span class="k">Passed</span><span class="n">{{ s.passed }}</span></li>
+    <li class="tile fail"><span class="k">Failed</span><span class="n">{{ s.failed }}</span></li>
+    <li class="tile review"><span class="k">Human Review</span><span class="n">{{ s.review }}</span></li>
+    <li class="tile rem-pending"><span class="k">Remediation Pending</span><span class="n">{{ s.remediation_pending }}</span></li>
+    <li class="tile fail"><span class="k">Critical / High</span><span class="n">{{ s.critical_high_findings }}</span></li>
+  </ul>
+  {% if s.bullets %}
+  <ul class="bullets">
+    {% for b in s.bullets %}<li>{{ b }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Top Findings</h2>
+    <a class="btn small" href="/findings?run={{ view.run_id }}">All findings</a>
+  </div>
+  {% if view.top_findings %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Control</th><th>Asset</th><th>Severity</th><th>Finding</th></tr></thead>
+      <tbody>
+        {% for f in view.top_findings %}
+        <tr>
+          <td class="mono nowrap">
+            <a href="/assessment/control/{{ f.control_id }}?run={{ view.run_id }}">{{ f.control_id }}</a>
+          </td>
+          <td>{{ f.asset_name }}</td>
+          <td><span class="chip {% if f.severity.value in ('CRITICAL','HIGH') %}warn{% endif %}">{{ f.severity.value }}</span></td>
+          <td>{{ f.finding }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No open failures for this run.</p>
+  {% endif %}
+</section>
+
+{% endif %}
+{% endblock %}

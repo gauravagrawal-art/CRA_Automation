@@ -323,25 +323,46 @@ def render_final_html(
     assessment: Assessment,
     remediation: RemediationDocument,
     verification: VerificationDocument | None = None,
+    *,
+    assessments_dir=None,
 ) -> str:
     """Render the final report as one self-contained HTML document."""
+    from pathlib import Path
+
+    from src.compliance.mock_provider import MockComplianceProvider
+    from src.compliance.report import concise_body
+    from src.lifecycle.store import load_lifecycle
+    from src.services import runs_service
+
+    evidence = None
+    try:
+        evidence = runs_service.load_evidence(assessment.metadata.run_id)
+    except Exception:
+        evidence = None
+
+    lifecycle = None
+    try:
+        if assessments_dir is not None:
+            lifecycle = load_lifecycle(assessment.metadata.run_id, Path(assessments_dir))
+        else:
+            lifecycle = runs_service.load_lifecycle(assessment.metadata.run_id)
+    except Exception:
+        lifecycle = None
+
+    view = MockComplianceProvider().from_artifacts(
+        assessment=assessment,
+        evidence=evidence,
+        remediation=remediation,
+        lifecycle=lifecycle,
+    )
     body = "".join(
         [
             _mock_banner(assessment),
-            _header(assessment, remediation),
-            render_summary(assessment),
-            _action_summary(remediation),
+            f"<h1>{_e(REPORT_TITLE)}</h1>",
+            f"<div class='disclaimer'><strong>Scope</strong>{_e(DISCLAIMER)}</div>",
+            f"<div class='advisory'><strong>Remediation</strong>{_e(ADVISORY_NOTICE)}</div>",
+            concise_body(view, include_remediation=True),
             _closure(verification),
-            render_control_table(assessment),
-            _findings_table(remediation),
-            _item_details(remediation),
-            render_human_review(assessment),
-            render_limitations(assessment),
-            render_details(assessment),
-            f"<footer>{_e(REPORT_TITLE)} — run {_e(remediation.metadata.run_id)} — "
-            f"generated {_e(remediation.metadata.generated_at)}. "
-            "Verdicts come from the deterministic rule engine and recommendations "
-            "from the approved control registry.</footer>",
         ]
     )
     title = f"{REPORT_TITLE} — {remediation.metadata.run_id}"

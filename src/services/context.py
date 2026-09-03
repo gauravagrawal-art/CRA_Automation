@@ -22,12 +22,12 @@ from src.services.runs_service import RunOverview
 
 #: The workflow the stepper renders, in order.
 STAGES = [
-    ("sources", "Sources"),
-    ("registry", "Registry"),
-    ("evidence", "Evidence"),
     ("assessment", "Assessment"),
+    ("controls", "Controls"),
+    ("evidence", "Evidence"),
+    ("findings", "Findings"),
     ("remediation", "Remediation"),
-    ("verified", "Verified"),
+    ("report", "Report"),
 ]
 
 _STAGE_INDEX = {key: i for i, (key, _) in enumerate(STAGES)}
@@ -241,19 +241,18 @@ class WorkspaceContext:
 
 
 def _derive_stage(registry: RegistryState, latest: RunOverview | None) -> str:
-    if not registry.draft_exists and not registry.scannable:
-        return "sources"
-    if not registry.scannable:
-        return "registry"
-    if latest is None or not latest.has_evidence:
-        return "evidence"
-    if not latest.has_assessment:
+    """Map artifact state onto the user-facing compliance workflow steps."""
+    if latest is None or not latest.has_assessment:
+        if latest is not None and latest.has_evidence:
+            return "evidence"
         return "assessment"
-    if not latest.has_remediation:
+    if latest.open_findings or (latest.has_remediation and not latest.has_verification):
+        if not latest.has_remediation:
+            return "findings"
         return "remediation"
-    if latest.open_findings == 0 and latest.has_verification:
-        return "verified"
-    return "remediation"
+    if latest.has_remediation or latest.has_verification:
+        return "report"
+    return "controls"
 
 
 def _derive_next_action(

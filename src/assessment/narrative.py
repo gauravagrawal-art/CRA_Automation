@@ -82,70 +82,46 @@ def _failed_conditions(result: ControlResult) -> list[RuleTraceEntry]:
 
 
 def template_reason(result: ControlResult) -> str:
-    """Explain why the machine verdict follows, without widening the claim."""
+    """Explain why the machine verdict follows, in one short sentence."""
     verdict = result.verdict
 
     if verdict is Verdict.NOT_APPLICABLE:
-        approved_reason = result.applicability.get("reason") or "the approved control is out of scope"
-        return f"The approved registry marks this control NOT_APPLICABLE: {approved_reason}"
+        approved_reason = result.applicability.get("reason") or "out of scope"
+        return f"Not applicable: {approved_reason}"
 
     if verdict is Verdict.HUMAN_REVIEW_REQUIRED:
         return _human_review_reason(result)
 
     if verdict is Verdict.INSUFFICIENT_EVIDENCE:
-        detail = result.evaluator_error or "a required observation was not collected"
-        gaps = ", ".join(
-            f"{gap.evidence_key} ({gap.reason_code or gap.status})" for gap in result.evidence_gaps
-        )
-        suffix = f" Uncollected approved evidence: {gaps}." if gaps else ""
-        return (
-            f"The deterministic rules could not be evaluated because {detail}. "
-            f"Missing evidence is not treated as compliance.{suffix}"
-        )
+        gaps = ", ".join(gap.evidence_key for gap in result.evidence_gaps[:3])
+        if gaps:
+            return f"Required evidence not collected: {gaps}."
+        detail = result.evaluator_error or "required observation missing"
+        return f"Insufficient evidence: {detail}."
 
     if verdict is Verdict.PASS:
-        count = len(result.evaluator_trace)
-        return (
-            f"All {count} approved deterministic condition(s) matched the collected evidence "
-            f"({_evidence_phrase(result.evidence_ids)}). This states only what the cited "
-            "evidence proves about the observed configuration; it is not a CRA conformity "
-            "claim."
-        )
+        return "All approved conditions matched."
 
     failed = _failed_conditions(result)
-    detail = "; ".join(
+    if not failed:
+        return "Approved condition did not match."
+    entry = failed[0]
+    detail = (
         f"expected {_condition_sentence(entry)} but observed {_observed_phrase(entry)}"
-        for entry in failed
     )
     if verdict is Verdict.PARTIAL:
-        return (
-            "The approved control defines an explicit partial condition that the evidence "
-            f"met, while the following mandatory condition(s) did not match: {detail}."
-        )
-    return f"The following approved mandatory condition(s) did not match: {detail}."
+        return f"Partial match: {detail}."
+    return f"{detail}."
 
 
 def _human_review_reason(result: ControlResult) -> str:
     if result.evaluator_error:
-        return (
-            "The approved control could not be executed by this evaluator "
-            f"({result.evaluator_error}). An implementation limitation is never resolved as "
-            "PASS or FAIL."
-        )
+        return f"Evaluator could not run this control: {result.evaluator_error}."
     status = result.applicability.get("status")
     if status in ("CONDITIONAL", "HUMAN_REVIEW_REQUIRED"):
-        approved_reason = result.applicability.get("reason") or "applicability is unresolved"
-        assumptions = result.applicability.get("assumptions") or []
-        suffix = f" Unresolved: {'; '.join(str(a) for a in assumptions)}." if assumptions else ""
-        return (
-            f"Applicability is {status} and remains unresolved: {approved_reason}. "
-            f"A human decision is required before a machine verdict is meaningful.{suffix}"
-        )
-    return (
-        f"The approved control has evaluation mode {result.evaluation_mode} with no "
-        "deterministic rule, so it rests on documentary or human judgement. This POC does "
-        "not generate a PASS or FAIL for such controls."
-    )
+        approved_reason = result.applicability.get("reason") or "applicability unresolved"
+        return f"Human review required ({status}): {approved_reason}."
+    return "No deterministic rule; human judgement required."
 
 
 def apply_template_narrative(result: ControlResult) -> ControlResult:

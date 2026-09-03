@@ -2,223 +2,208 @@
 {% import 'partials/macros.html' as m %}
 {% block content %}
 
-<p class="small"><a href="/assessment?run={{ run_id }}">← Assessment for {{ run_id }}</a></p>
+<p class="small"><a href="/controls?run={{ run_id }}">← Controls</a></p>
+
+{% if not control %}
+<div class="panel"><p class="empty">Control not found in the compliance view.</p></div>
+{% else %}
 
 <div class="panel">
   <div class="panel-head">
-    <h2>{{ result.control_id }}</h2>
+    <h2 class="mono">{{ control.control_id }}</h2>
     <div class="right">
-      {{ m.badge(result.verdict) }}
-      <span class="chip" title="{{ explain(result.severity) }}">Severity {{ result.severity | title }}</span>
+      {{ m.badge(control.status) }}
+      {% if control.severity.value != 'NONE' %}
+      <span class="chip">{{ control.severity.value }}</span>
+      {% endif %}
     </div>
   </div>
-  <p class="lede">{{ result.title }}</p>
-
-  <div class="field">
-    <div class="label">In plain language</div>
-    <p>{{ result.reason }}</p>
-  </div>
-  {{ m.why(result.verdict.value, 'Why ' ~ result.verdict.value.replace('_', ' ') ~ '?') }}
-</div>
-
-<h2 class="section">Expected vs observed</h2>
-<div class="compare">
-  <div class="col expected">
-    <h3>Expected</h3>
-    <p>{{ result.expected_state or 'No deterministic expectation is defined for this control.' }}</p>
-  </div>
-  <div class="col observed">
-    <h3>Observed</h3>
-    <p>{{ result.observed_state or 'Nothing was observed for the paths this control addresses.' }}</p>
-  </div>
-</div>
-
-<h2 class="section">Evidence</h2>
-{% if result.evidence_ids %}
-<div class="table-wrap">
-  <table>
-    <thead><tr><th>Evidence ID</th><th>Tool</th><th>Target</th><th>Status</th><th>Collected</th></tr></thead>
-    <tbody>
-      {% for eid in result.evidence_ids %}
-      {% set ev = evidence_by_id.get(eid) %}
-      <tr>
-        <td class="mono nowrap"><a href="/evidence/{{ run_id }}/{{ eid }}">{{ eid }}</a></td>
-        <td class="mono small">{{ ev.tool if ev else '—' }}</td>
-        <td class="small">
-          {% if ev %}{{ ev.target_id }}{% if ev.parameters_redacted.get('port') %} :{{ ev.parameters_redacted['port'] }}{% endif %}{% else %}—{% endif %}
-        </td>
-        <td>{% if ev %}{{ m.badge(ev.status) }}{% else %}—{% endif %}</td>
-        <td class="small nowrap">{{ ev.collected_at | ts if ev else '—' }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% else %}
-<div class="panel"><p class="empty">No evidence was associated with this control.</p></div>
-{% endif %}
-
-{% if result.evidence_gaps %}
-<div class="panel">
-  <h2>Evidence gaps</h2>
-  <p class="lede">Approved evidence this run did not collect. Missing evidence is never read as compliance.</p>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Evidence key</th><th>Status</th><th>Reason</th><th>Required</th></tr></thead>
-      <tbody>
-        {% for gap in result.evidence_gaps %}
-        <tr>
-          <td class="mono small">{{ gap.evidence_key }}</td>
-          <td>{{ m.badge(gap.status) }}</td>
-          <td class="small">
-            <span class="mono">{{ gap.reason_code or '—' }}</span>
-            {% if gap.reason_code %}<div class="muted">{{ explain(gap.reason_code) }}</div>{% endif %}
-          </td>
-          <td>{{ 'Yes' if gap.required else 'No' }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-{% endif %}
-
-<h2 class="section">Why this result occurred</h2>
-<p class="lede">
-  The deterministic evaluator trace: each approved condition, the value the evidence carried, and
-  whether it matched. This is the whole basis of the verdict.
-</p>
-
-{% if result.evaluator_trace %}
-<div class="table-wrap">
-  <table>
-    <thead><tr><th>Rule</th><th>Observed</th><th>Result</th><th>Evidence</th></tr></thead>
-    <tbody>
-      {% for entry in result.evaluator_trace %}
-      <tr>
-        <td class="mono small">
-          {{ entry.rule.get('path', '—') }}
-          <strong>{{ entry.rule.get('operator', '') }}</strong>
-          {% if entry.rule.get('value') is not none %}{{ entry.rule.get('value') | tojson }}{% endif %}
-        </td>
-        <td class="mono small wrap">{{ entry.observed | tojson if entry.observed is not none else 'not observed' }}</td>
-        <td class="nowrap">
-          {% if entry.matched %}<span class="badge PASS">matched</span>
-          {% else %}<span class="badge FAIL">did not match</span>{% endif %}
-          {% if entry.note %}<div class="small muted">{{ entry.note }}</div>{% endif %}
-        </td>
-        <td class="mono small">{{ entry.evidence_ids | join(', ') or '—' }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% elif result.evaluator_error %}
-<div class="notice error">
-  The evaluator could not execute this control's rules: {{ result.evaluator_error }}.
-  The verdict is {{ result.verdict.value }} rather than a silent pass or fail.
-</div>
-{% else %}
-<div class="panel">
-  <p class="empty">
-    No deterministic rule was evaluated for this control
-    {% if result.evaluation_mode != 'DETERMINISTIC' %}({{ result.evaluation_mode.replace('_', ' ') | lower }}){% endif %}.
+  <p class="lede">{{ control.title }}</p>
+  {% if assets %}
+  <p class="small muted">Asset{% if assets|length > 1 %}s{% endif %}:
+    {{ assets | map(attribute='name') | join(', ') }}
   </p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <div class="field">
+    <div class="label">Requirement</div>
+    <p>{{ control.requirement or '—' }}</p>
+  </div>
+  <div class="field">
+    <div class="label">Evidence</div>
+    {% if control.evidence %}
+    <ul class="plain">
+      {% for fact in control.evidence %}
+      <li>
+        {{ fact.text }}
+        {% if fact.evidence_ids %}
+        <span class="small muted">
+          ({% for eid in fact.evidence_ids %}<a class="mono" href="/evidence/{{ run_id }}/{{ eid }}">{{ eid }}</a>{% if not loop.last %}, {% endif %}{% endfor %})
+        </span>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">No concise evidence facts for this control.</p>
+    {% endif %}
+  </div>
+  <div class="field">
+    <div class="label">Status</div>
+    <p>{{ m.badge(control.status) }}
+      <span class="small muted">(engine: {{ control.engine_verdict }})</span>
+    </p>
+  </div>
+  {% if control.previous_status %}
+  <div class="field">
+    <div class="label">Previous status</div>
+    <p>{{ m.badge(control.previous_status) }}</p>
+  </div>
+  {% elif control.initial_status and control.initial_status != control.status %}
+  <div class="field">
+    <div class="label">Initial status</div>
+    <p>{{ m.badge(control.initial_status) }}</p>
+  </div>
+  {% endif %}
+  <div class="field">
+    <div class="label">Reason</div>
+    <p>{{ control.reason or control.finding or '—' }}</p>
+  </div>
+  {% if control.finding and control.finding != control.reason %}
+  <div class="field">
+    <div class="label">Finding</div>
+    <p>{{ control.finding }}</p>
+  </div>
+  {% endif %}
+  {% if control.remediation %}
+  <div class="field">
+    <div class="label">Remediation</div>
+    <p>{{ control.remediation }}</p>
+    {% if control.remediation_applied %}
+    <p class="small muted">Applied (mock){% if control.remediation_status %} · {{ control.remediation_status }}{% endif %}</p>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if control.verification %}
+  <div class="field">
+    <div class="label">Verification</div>
+    <p>{{ control.verification }}</p>
+  </div>
+  {% endif %}
+  {% if control.analysis_decision %}
+  <div class="field">
+    <div class="label">Analysis result</div>
+    <p>{{ m.badge(control.analysis_decision) }}</p>
+  </div>
+  {% if control.analysis_reason %}
+  <div class="field">
+    <div class="label">Analysis reason</div>
+    <p>{{ control.analysis_reason }}</p>
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+
+{% if control.can_apply_remediation %}
+<div class="panel">
+  <p class="lede small">Mock remediation simulates apply → verify → re-evaluate. Nothing is changed on a real target.</p>
+  <form method="post" action="/actions/lifecycle/apply-remediation"
+        data-confirm="Apply mock remediation and verify for {{ control.control_id }}?">
+    <input type="hidden" name="run_id" value="{{ run_id }}">
+    <input type="hidden" name="control_id" value="{{ control.control_id }}">
+    <button class="btn primary" type="submit" data-busy-label="Applying…">Apply Remediation</button>
+  </form>
 </div>
 {% endif %}
 
-{% if result.derived_paths %}
+{% if control.can_submit_evidence %}
+<div class="panel">
+  <h2>Human evidence review</h2>
+  <p class="lede small">
+    {% if control.analysis_decision and control.analysis_decision != 'PASS' %}
+    Submit additional evidence for re-analysis.
+    {% else %}
+    The scanner cannot decide this control automatically. Submit evidence for mock analysis.
+    {% endif %}
+  </p>
+  <form method="post" action="/actions/lifecycle/analyse-evidence" enctype="multipart/form-data">
+    <input type="hidden" name="run_id" value="{{ run_id }}">
+    <input type="hidden" name="control_id" value="{{ control.control_id }}">
+    <div class="field">
+      <label class="label" for="description">Evidence description</label>
+      <textarea id="description" name="description" rows="3" class="input"
+                placeholder="e.g. Default admin account has been disabled."></textarea>
+    </div>
+    <div class="field">
+      <label class="label" for="comments">Comments (optional)</label>
+      <input id="comments" name="comments" type="text" class="input">
+    </div>
+    <div class="field">
+      <label class="label" for="attachments">Attach evidence</label>
+      <input id="attachments" name="attachments" type="file" multiple>
+    </div>
+    <button class="btn primary" type="submit" data-busy-label="Analysing…">Analyse Evidence</button>
+  </form>
+</div>
+{% endif %}
+
+{% if control.review_history %}
 <details class="panel">
-  <summary>Derived values — {{ result.derived_paths | length }}</summary>
+  <summary>Evidence review history</summary>
   <div class="body">
-    <p class="small muted">
-      Paths computed by the assessment from collected evidence rather than observed directly. The
-      basis for each is recorded so the derivation is auditable.
-    </p>
+    {% for attempt in control.review_history %}
+    <div class="field">
+      <div class="label">Attempt {{ attempt.attempt }}</div>
+      <p class="small"><strong>Evidence:</strong> {{ attempt.evidence or '—' }}</p>
+      <p class="small"><strong>Result:</strong> {{ attempt.decision }} — {{ attempt.reason }}</p>
+      <p class="small muted">{{ attempt.timestamp }}</p>
+    </div>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+
+{% if remediation_item %}
+<p class="small"><a href="/remediation?run={{ run_id }}">Open in Remediation →</a></p>
+{% endif %}
+
+<details class="panel">
+  <summary>Audit trail</summary>
+  <div class="body">
+    <div class="field">
+      <div class="label">Expected</div>
+      <p class="small">{{ control.audit.get('expected_state', '—') }}</p>
+    </div>
+    <div class="field">
+      <div class="label">Observed</div>
+      <p class="small">{{ control.audit.get('observed_state', '—') }}</p>
+    </div>
+    {% set trace = control.audit.get('evaluator_trace') or [] %}
+    {% if trace %}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Path</th><th>From</th><th>Basis</th></tr></thead>
+        <thead><tr><th>Rule</th><th>Observed</th><th>Match</th></tr></thead>
         <tbody>
-          {% for d in result.derived_paths %}
+          {% for entry in trace %}
           <tr>
-            <td class="mono small">{{ d.path }}</td>
-            <td class="mono small">{{ d.evidence_id }}</td>
-            <td class="small">{{ d.basis }}</td>
+            <td class="mono small">
+              {{ entry.rule.get('path', '—') }}
+              <strong>{{ entry.rule.get('operator', '') }}</strong>
+              {% if entry.rule.get('value') is not none %}{{ entry.rule.get('value') | tojson }}{% endif %}
+            </td>
+            <td class="mono small wrap">{{ entry.observed | tojson if entry.observed is not none else '—' }}</td>
+            <td>{% if entry.matched %}<span class="badge PASS">yes</span>{% else %}<span class="badge FAIL">no</span>{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
-  </div>
-</details>
-{% endif %}
-
-<h2 class="section">Explanation</h2>
-<div class="panel">
-  {% if result.narrative_source == 'template' %}
-  <p class="muted">
-    AI narrative not configured. The deterministic assessment result remains available above, and
-    this explanation was generated from the evaluator trace.
-  </p>
-  {% else %}
-  <p>{{ result.reason }}</p>
-  <p class="small muted">
-    Narrative source: {{ result.narrative_source }}. A model may only rewrite prose — the verdict,
-    severity, identifiers and counts are owned by the application.
-  </p>
-  {% endif %}
-</div>
-
-{% if remediation_item %}
-<h2 class="section">Recommended action</h2>
-<div class="panel">
-  <div class="panel-head">
-    <h2>{{ remediation_item.action_type.value.replace('_', ' ') | title }}</h2>
-    <div class="right">{{ m.badge(remediation_item.status) }}</div>
-  </div>
-  {% if remediation_item.recommendation %}
-  <p>{{ remediation_item.recommendation }}</p>
-  <p class="small muted">Copied verbatim from the approved registry's remediation seed. Nothing is executed.</p>
-  {% else %}
-  <p class="muted">{{ remediation_item.reason }}</p>
-  {% endif %}
-  <a class="btn small" href="/remediation?run={{ run_id }}&tab={{ remediation_item.action_type.value }}">Open in Remediation</a>
-</div>
-{% endif %}
-
-<h2 class="section">Traceability</h2>
-
-<details class="panel">
-  <summary>Regulatory and technical sources</summary>
-  <div class="body">
-    <div class="field">
-      <div class="label">Legal requirement</div>
-      <p class="small">{{ result.legal_requirement.get('normalized_requirement', '—') }}</p>
-      {% if result.legal_requirement.get('original_text') %}
-      <blockquote class="excerpt">{{ result.legal_requirement['original_text'] }}</blockquote>
-      {% endif %}
-    </div>
-    {% for label, key in [
-        ('CRA source', 'legal_sources'),
-        ('Classification source', 'classification_sources'),
-        ('Guidance', 'guidance_sources'),
-        ('ETSI technical reference', 'technical_reference_sources')] %}
-      {% set refs = result.source_traceability.get(key, []) %}
-      {% if refs %}
-      <h3 class="small">{{ label }}</h3>
-      {% for ref in refs %}
-      <div class="field">
-        <div class="label">{{ ref.get('document_id') }}</div>
-        {% if ref.get('normalized_summary') %}<div class="small">{{ ref['normalized_summary'] }}</div>{% endif %}
-        {% if ref.get('source_excerpt') %}<blockquote class="excerpt">{{ ref['source_excerpt'] }}</blockquote>{% endif %}
-      </div>
-      {% endfor %}
-      {% endif %}
-    {% endfor %}
-    <p class="small">
-      <a href="/registry/control/{{ result.control_id }}">Open the approved control definition →</a>
-    </p>
+    {% endif %}
+    <p class="small"><a href="/registry/control/{{ control.control_id }}">Open approved control definition →</a></p>
   </div>
 </details>
 
+{% endif %}
 {% endblock %}

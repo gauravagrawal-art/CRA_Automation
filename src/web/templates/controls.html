@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block content %}
+
+{% if not view or not view.controls %}
+<div class="panel"><p class="empty">No assessed controls yet. Open <a href="/">Assessment</a> first.</p></div>
+{% else %}
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Controls</h2>
+    <div class="right">
+      {{ m.run_picker(view.run_id, ctx.runs | selectattr('has_assessment') | list, '/controls', filters) }}
+    </div>
+  </div>
+</div>
+
+<form method="get" action="/controls" class="filters">
+  <input type="hidden" name="run" value="{{ view.run_id }}">
+  <div class="field-inline">
+    <label for="q">Search</label>
+    <input type="search" id="q" name="q" value="{{ filters.get('q', '') }}" placeholder="Control ID or title">
+  </div>
+  <div class="field-inline">
+    <label for="status">Status</label>
+    <select id="status" name="status">
+      <option value="">All</option>
+      {% for s in ['PASS','FAIL','REVIEW','REMEDIATION_PENDING','NOT_APPLICABLE'] %}
+      <option value="{{ s }}" {% if filters.get('status') == s %}selected{% endif %}>{{ s.replace('_',' ') }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn" type="submit">Apply</button>
+  <a class="btn" href="/controls?run={{ view.run_id }}">Clear</a>
+</form>
+
+{% if controls %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Control</th><th>Title</th><th>Assets</th><th>Status</th><th>Severity</th></tr>
+    </thead>
+    <tbody>
+      {% for c in controls %}
+      <tr>
+        <td class="mono nowrap"><a href="/assessment/control/{{ c.control_id }}?run={{ view.run_id }}">{{ c.control_id }}</a></td>
+        <td>{{ c.title }}</td>
+        <td class="small">{{ c.asset_ids | length }}</td>
+        <td>{{ m.badge(c.status) }}</td>
+        <td class="small">{{ c.severity.value if c.severity.value != 'NONE' else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{{ m.pager(pager, filters, '/controls') }}
+{% else %}
+<div class="panel"><p class="empty">No controls match these filters.</p></div>
+{% endif %}
+
+{% endif %}
+{% endblock %}

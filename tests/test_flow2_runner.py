@@ -76,7 +76,7 @@ def test_rejects_draft_registry(tmp_path):
 def test_rejects_tampered_registry_hash(tmp_path, approved_registry):
     tampered = copy.deepcopy(approved_registry)
     tampered["controls"][0]["title"] = "Tampered title"
-    registry_path = tmp_path / "controls.approved.v1.1.0.json"
+    registry_path = tmp_path / APPROVED_PATH.name
     registry_path.write_text(json.dumps(tampered, indent=2))
 
     manifest_src = APPROVED_PATH.with_name(APPROVED_PATH.stem + ".manifest.json")
@@ -96,8 +96,8 @@ def test_untampered_registry_matches_manifest():
 
 def test_records_registry_version_and_hash(run_result):
     _, run = run_result
-    _, registry_hash = load_approved_registry(APPROVED_PATH)
-    assert run.run.registry_version == "1.1.0"
+    registry, registry_hash = load_approved_registry(APPROVED_PATH)
+    assert run.run.registry_version == registry["metadata"]["registry_version"]
     assert run.run.registry_hash == registry_hash
     assert run.run.target_profile_hash
     assert run.run.provider == "mock"

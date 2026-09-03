@@ -5,274 +5,113 @@
 
 <p class="small"><a href="/reports">← All runs</a></p>
 
-{% set meta = assessment.metadata if assessment else none %}
+{% if not view or view.summary.overall_status.value == 'NOT ASSESSED' %}
+<div class="panel">
+  <h2>{{ run_id }}</h2>
+  <p class="empty">No assessment for this run yet.</p>
+  {% if overview.has_evidence %}
+  <p class="small"><a href="/evidence?run={{ run_id }}">Open evidence</a></p>
+  {% endif %}
+</div>
+{% else %}
 
+{% set s = view.summary %}
 <div class="panel">
   <div class="panel-head">
     <h2>{{ run_id }}</h2>
     <div class="right btn-row">
-      {% if overview.has_evidence %}
-        <a class="btn small" href="/runs/{{ run_id }}/artifact/evidence.json">Evidence JSON</a>
-      {% endif %}
       {% if has_html_report %}
         <a class="btn small" href="/runs/{{ run_id }}/artifact/assessment.html">Assessment HTML</a>
-      {% endif %}
-      {% if overview.has_assessment %}
-        <a class="btn small" href="/runs/{{ run_id }}/artifact/assessment.json">Assessment JSON</a>
       {% endif %}
       {% if has_final_report %}
         <a class="btn small primary" href="/runs/{{ run_id }}/artifact/final-report.html">Final HTML report</a>
       {% endif %}
+      {% if overview.has_assessment %}
+        <a class="btn small" href="/runs/{{ run_id }}/artifact/assessment.json">JSON</a>
+      {% endif %}
     </div>
   </div>
-  {% if overview.is_mock %}
-  <div class="notice warn"><b>SYNTHETIC / MOCK DATA</b> — {{ explain('MOCK') }}</div>
+  {% if view.is_mock %}
+  <div class="notice warn"><b>SYNTHETIC / MOCK DATA</b></div>
   {% endif %}
-  <dl class="meta">
-    <dt>Target</dt><dd>{{ overview.target_id or '—' }}</dd>
-    <dt>Provider</dt><dd>{{ overview.provider | upper or '—' }}</dd>
-    <dt>Registry</dt>
-    <dd>{% if overview.registry_version %}v{{ overview.registry_version }}{% else %}—{% endif %}
-      {% if overview.registry_hash %}<span class="mono small">{{ overview.registry_hash }}</span>{% endif %}
-    </dd>
-    <dt>Started</dt><dd>{{ overview.started_at | ts }}</dd>
-    <dt>Stage</dt><dd>{{ overview.stage_label }}</dd>
-  </dl>
+  <p class="overall {{ 'fail' if 'ATTENTION' in s.overall_status.value else ('review' if 'REVIEW' in s.overall_status.value else 'pass') }}">
+    Overall Status: <strong>{{ s.overall_status.value }}</strong>
+  </p>
+  <ul class="tiles compact">
+    <li class="tile accent"><span class="k">Assets</span><span class="n">{{ s.assets_assessed }}</span></li>
+    <li class="tile accent"><span class="k">Controls</span><span class="n">{{ s.controls_assessed }}</span></li>
+    <li class="tile pass"><span class="k">Passed</span><span class="n">{{ s.passed }}</span></li>
+    <li class="tile fail"><span class="k">Failed</span><span class="n">{{ s.failed }}</span></li>
+    <li class="tile review"><span class="k">Human Review</span><span class="n">{{ s.review }}</span></li>
+    <li class="tile rem-pending"><span class="k">Remediation Pending</span><span class="n">{{ s.remediation_pending }}</span></li>
+    <li class="tile fail"><span class="k">Critical / High</span><span class="n">{{ s.critical_high_findings }}</span></li>
+  </ul>
+  {% if s.bullets %}
+  <ul class="bullets">{% for b in s.bullets %}<li>{{ b }}</li>{% endfor %}</ul>
+  {% endif %}
 </div>
 
 <section class="panel">
-  <h2>Executive summary</h2>
-  <p>
-    This is an automated technical readiness assessment of observed host configuration.
-    It is not a CRA certification, not a declaration of conformity, and not a statement of
-    legal compliance.
-  </p>
-  {% if assessment %}
-  <p>
-    {{ assessment.summary.total }} approved control(s) were assessed:
-    {{ assessment.summary.passed }} passed,
-    {{ assessment.summary.fail }} failed,
-    {{ assessment.summary.partial }} partial,
-    {{ assessment.summary.insufficient_evidence }} had insufficient evidence,
-    {{ assessment.summary.human_review_required }} need human review,
-    {{ assessment.summary.not_applicable }} were not applicable.
-  </p>
-  <p class="small muted">
-    {{ overview.open_findings }} finding(s) remain open.
-    {{ overview.verified_closed }} have been verified closed by a later evidence-backed PASS.
-  </p>
-  {% elif evidence %}
-  <p>Evidence has been collected for this run. No assessment has been produced yet.</p>
-  {% else %}
-  <p class="muted">No artifacts were readable for this run.</p>
-  {% endif %}
-</section>
-
-<section class="panel">
-  <h2>What was assessed</h2>
-  {% if meta %}
-  <dl class="meta">
-    <dt>Assessment ID</dt><dd class="mono">{{ meta.assessment_id }}</dd>
-    <dt>Evidence SHA-256</dt><dd class="mono wrap">{{ meta.evidence_sha256 }}</dd>
-    <dt>AI narration</dt><dd>{{ meta.llm_narration }}</dd>
-    <dt>Generated</dt><dd>{{ meta.generated_at | ts }}</dd>
-  </dl>
-  <p class="small">
-    <a href="/assessment?run={{ run_id }}">Open the interactive assessment</a>
-    · <a href="/evidence?run={{ run_id }}">Open collected evidence</a>
-  </p>
-  {% elif evidence %}
-  <dl class="meta">
-    <dt>Evidence items</dt><dd>{{ evidence.summary.evidence_items }}</dd>
-    <dt>MCP calls</dt><dd>{{ evidence.summary.mcp_calls_planned }}</dd>
-    <dt>Collection errors</dt><dd>{{ evidence.summary.collection_errors }}</dd>
-  </dl>
-  {% else %}
-  <p class="muted">Nothing has been assessed for this run.</p>
-  {% endif %}
-</section>
-
-<section class="panel">
-  <h2>Assessment results</h2>
-  {% if assessment %}
+  <h2>Findings</h2>
+  {% if view.findings %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Verdict</th><th class="num">Count</th><th></th></tr></thead>
+      <thead><tr><th>Control</th><th>Asset</th><th>Status</th><th>Severity</th><th>Finding</th></tr></thead>
       <tbody>
-        {% for v in VERDICT_ORDER %}
-        {% set n = overview.verdict_counts.get(v.value, 0) %}
+        {% for f in view.findings %}
         <tr>
-          <td>{{ m.badge(v) }} {{ m.why(v.value) }}</td>
-          <td class="num">{{ n }}</td>
-          <td>{% if n %}<a href="/assessment?run={{ run_id }}&verdict={{ v.value }}">View</a>{% endif %}</td>
+          <td class="mono"><a href="/assessment/control/{{ f.control_id }}?run={{ run_id }}">{{ f.control_id }}</a></td>
+          <td>{{ f.asset_name }}</td>
+          <td>{{ m.badge(f.status) }}</td>
+          <td>{{ f.severity.value }}</td>
+          <td>{{ f.finding }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% else %}
-  <p class="muted">No verdicts yet.</p>
+  <p class="muted">No findings.</p>
   {% endif %}
 </section>
 
 <section class="panel">
-  <h2>Evidence gaps</h2>
-  <p class="lede">{{ explain('INSUFFICIENT_EVIDENCE') }}</p>
-  {% set gaps = by_verdict.get('INSUFFICIENT_EVIDENCE', []) %}
-  {% if gaps %}
-  <ul>
-    {% for r in gaps %}
-    <li>
-      <a class="mono" href="/assessment/control/{{ r.control_id }}?run={{ run_id }}">{{ r.control_id }}</a>
-      — {{ r.title.split(':', 1)[1] | trim if ':' in r.title else r.title }}
-    </li>
-    {% endfor %}
-  </ul>
-  {% else %}
-  <p class="muted">No insufficient-evidence verdicts in this run.</p>
-  {% endif %}
-</section>
-
-<section class="panel">
-  <h2>Human review required</h2>
-  <p class="lede">{{ explain('HUMAN_REVIEW_REQUIRED') }}</p>
-  {% set reviews = by_verdict.get('HUMAN_REVIEW_REQUIRED', []) %}
-  {% if reviews %}
-  <ul>
-    {% for r in reviews %}
-    <li>
-      <a class="mono" href="/assessment/control/{{ r.control_id }}?run={{ run_id }}">{{ r.control_id }}</a>
-      — {{ r.reason }}
-    </li>
-    {% endfor %}
-  </ul>
-  {% else %}
-  <p class="muted">No controls in this run require a human decision.</p>
-  {% endif %}
-</section>
-
-<section class="panel">
-  <h2>Open findings</h2>
-  {% set findings = (by_verdict.get('FAIL', []) + by_verdict.get('PARTIAL', [])) %}
-  {% if findings %}
+  <h2>Remediation</h2>
+  {% if view.remediations %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Control</th><th>Verdict</th><th>Why</th></tr></thead>
+      <thead><tr><th>Priority</th><th>Control</th><th>Asset</th><th>Recommended action</th></tr></thead>
       <tbody>
-        {% for r in findings %}
+        {% for item in view.remediations %}
         <tr>
-          <td class="mono nowrap"><a href="/assessment/control/{{ r.control_id }}?run={{ run_id }}">{{ r.control_id }}</a></td>
-          <td>{{ m.badge(r.verdict) }}</td>
-          <td class="small">{{ r.reason | truncate(160) }}</td>
+          <td>{{ item.severity.value if item.severity.value != 'NONE' else '—' }}</td>
+          <td class="mono">{{ item.control_id }}</td>
+          <td>{{ item.asset_name }}</td>
+          <td>{{ item.recommended_action }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+  <p class="small"><a href="/remediation?run={{ run_id }}">Open Remediation</a></p>
   {% else %}
-  <p class="muted">No FAIL or PARTIAL findings in this run.</p>
+  <p class="muted">Remediation not composed, or no actions required.</p>
   {% endif %}
 </section>
 
-<section class="panel">
-  <h2>Recommended remediation</h2>
-  {% if remediation %}
-  <p>
-    {{ remediation.summary.items_total }} advisory item(s):
-    {{ remediation.summary.by_action_type.get('TECHNICAL_REMEDIATION', 0) }} technical,
-    {{ remediation.summary.by_action_type.get('EVIDENCE_RESOLUTION', 0) }} evidence gaps,
-    {{ remediation.summary.by_action_type.get('HUMAN_REVIEW', 0) }} human review.
-    Nothing is executed.
-  </p>
-  <p class="small"><a href="/remediation?run={{ run_id }}">Open Remediation &amp; Verify</a></p>
-  <details>
-    <summary>Items</summary>
-    <div class="body">
-      <ul class="small">
-        {% for item in remediation.items %}
-        <li>
-          <span class="mono">{{ item.finding_control_id }}</span>
-          {{ m.badge(item.action_type) }} {{ m.badge(item.status) }}
-          — {{ (item.recommendation or item.reason) | truncate(140) }}
-        </li>
-        {% endfor %}
-      </ul>
-    </div>
-  </details>
-  {% else %}
-  <p class="muted">Remediation has not been composed for this run.</p>
-  {% endif %}
-</section>
+<details class="panel">
+  <summary>Evidence &amp; audit</summary>
+  <div class="body">
+    <p class="small">
+      Registry <span class="mono">{{ view.registry_hash | short(16) }}</span> ·
+      Evidence <span class="mono">{{ view.evidence_sha256 | short(16) }}</span>
+    </p>
+    <p class="small">
+      <a href="/evidence?run={{ run_id }}">Browse evidence</a> ·
+      <a href="/controls?run={{ run_id }}">Browse controls</a>
+    </p>
+  </div>
+</details>
 
-<section class="panel">
-  <h2>Verification status</h2>
-  {% if verification %}
-  <p>
-    Compared {{ verification.metadata.previous_run_id }} with {{ verification.metadata.new_run_id }}:
-    {{ verification.summary.verified_closed }} verified closed,
-    {{ verification.summary.still_open }} still open,
-    {{ verification.summary.blocked }} blocked.
-  </p>
-  {% if not verification.baseline_comparable %}
-  <div class="notice warn">{{ explain('VERIFICATION_BLOCKED') }}</div>
-  {% endif %}
-  <details>
-    <summary>Per-control outcomes</summary>
-    <div class="body">
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Control</th><th>Previous</th><th>New</th><th>Outcome</th></tr></thead>
-          <tbody>
-            {% for item in verification.items %}
-            <tr>
-              <td class="mono">{{ item.control_id }}</td>
-              <td>{{ m.badge(item.previous_verdict) }}</td>
-              <td>{% if item.new_verdict %}{{ m.badge(item.new_verdict) }}{% else %}—{% endif %}</td>
-              <td>{{ m.badge(item.outcome) }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </details>
-  {% else %}
-  <p class="muted">This run has not been compared with an earlier assessment.</p>
-  {% endif %}
-</section>
-
-<section class="panel">
-  <h2>Technical traceability</h2>
-  <p class="lede">
-    Every verdict names the approved control, the evidence IDs it used and the source documents
-    that control was derived from. Open a control to follow the chain.
-  </p>
-  {% if assessment %}
-  <p class="small">
-    Registry hash <span class="mono">{{ meta.registry_hash }}</span> ·
-    Evidence hash <span class="mono">{{ meta.evidence_sha256 }}</span>
-  </p>
-  <p class="small"><a href="/assessment?run={{ run_id }}">Browse assessed controls</a></p>
-  {% else %}
-  <p class="muted">Traceability appears once an assessment exists.</p>
-  {% endif %}
-</section>
-
-<section class="panel">
-  <h2>Limitations</h2>
-  {% if assessment and assessment.limitations %}
-  <ul>
-    {% for lim in assessment.limitations %}
-    <li><span class="mono">{{ lim.code.value }}</span> — {{ lim.detail }}</li>
-    {% endfor %}
-  </ul>
-  {% else %}
-  <p>
-    This report describes observed host configuration at collection time. It is not certification
-    and does not score compliance. Findings carry severity UNCLASSIFIED because the registry
-    defines no approved severity model.
-  </p>
-  {% endif %}
-</section>
-
+{% endif %}
 {% endblock %}
